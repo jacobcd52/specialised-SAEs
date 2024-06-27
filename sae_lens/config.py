@@ -105,6 +105,8 @@ class LanguageModelSAERunnerConfig:
         model_kwargs (dict[str, Any]): Additional keyword arguments for the model.
         model_from_pretrained_kwargs (dict[str, Any]): Additional keyword arguments for the model from pretrained.
     """
+    # JACOB
+    gsae_path : Optional[str] = None
 
     # Data Generating Function (Model + Training Distibuion)
     model_name: str = "gelu-2l"
@@ -384,6 +386,8 @@ class LanguageModelSAERunnerConfig:
             "decoder_heuristic_init": self.decoder_heuristic_init,
             "init_encoder_as_decoder_transpose": self.init_encoder_as_decoder_transpose,
             "normalize_activations": self.normalize_activations,
+            "gsae_path" : self.gsae_path
+            
         }
 
     def to_dict(self) -> dict[str, Any]:
@@ -478,6 +482,7 @@ class CacheActivationsRunnerConfig:
 @dataclass
 class ToyModelSAERunnerConfig:
 
+    dataset_trust_remote_code : bool = True
     architecture: Literal["standard", "gated"] = "standard"
 
     # ReLu Model Parameters
@@ -544,6 +549,7 @@ class ToyModelSAERunnerConfig:
             "hook_head_index": None,
             "activation_fn": "relu",
             "apply_b_dec_to_input": True,
+            "dataset_trust_remote_code" : self.dataset_trust_remote_code
         }
 
 

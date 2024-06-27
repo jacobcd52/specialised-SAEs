@@ -5,6 +5,7 @@ https://github.com/ArthurConmy/sae/blob/main/sae/model.py
 import os
 from dataclasses import dataclass
 from typing import Any, Optional
+import dill
 
 import einops
 import torch
@@ -32,6 +33,8 @@ class TrainStepOutput:
 
 @dataclass
 class TrainingSAEConfig(SAEConfig):
+    # JACOB
+    gsae_path : Optional[str]
 
     # Sparsity Loss Calculations
     l1_coefficient: float
@@ -51,6 +54,9 @@ class TrainingSAEConfig(SAEConfig):
     ) -> "TrainingSAEConfig":
 
         return cls(
+            # JACOB
+            gsae_path = cfg.gsae_path,
+
             # base config
             architecture=cfg.architecture,
             d_in=cfg.d_in,
@@ -80,6 +86,8 @@ class TrainingSAEConfig(SAEConfig):
             init_encoder_as_decoder_transpose=cfg.init_encoder_as_decoder_transpose,
             scale_sparsity_penalty_by_decoder_norm=cfg.scale_sparsity_penalty_by_decoder_norm,
             normalize_activations=cfg.normalize_activations,
+            dataset_trust_remote_code=cfg.dataset_trust_remote_code
+
         )
 
     @classmethod
@@ -124,6 +132,7 @@ class TrainingSAEConfig(SAEConfig):
             "dataset_path": self.dataset_path,
             "dataset_trust_remote_code": self.dataset_trust_remote_code,
             "sae_lens_training_version": self.sae_lens_training_version,
+            "gsae_path" : self.gsae_path
         }
 
 
@@ -143,6 +152,12 @@ class TrainingSAE(SAE):
         base_sae_cfg = SAEConfig.from_dict(cfg.get_base_sae_cfg_dict())
         super().__init__(base_sae_cfg)
         self.cfg = cfg  # type: ignore
+
+        # JACOB
+        self.gsae = None
+        if cfg.gsae_path:
+            with open(cfg.gsae_path, 'rb') as f:
+                self.gsae = dill.load(f)
 
         self.encode_with_hidden_pre_fn = (
             self.encode_with_hidden_pre
@@ -261,8 +276,14 @@ class TrainingSAE(SAE):
         feature_acts, _ = self.encode_with_hidden_pre_fn(sae_in)
         sae_out = self.decode(feature_acts)
 
+        # JACOB
+        if self.gsae:
+            target = sae_in - self.gsae(sae_in)
+        else:
+            target = sae_in
+
         # MSE LOSS
-        per_item_mse_loss = self.mse_loss_fn(sae_out, sae_in)
+        per_item_mse_loss = self.mse_loss_fn(sae_out, target)
         mse_loss = per_item_mse_loss.sum(dim=-1).mean()
 
         # GHOST GRADS
