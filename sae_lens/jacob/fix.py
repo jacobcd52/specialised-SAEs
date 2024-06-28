@@ -1,5 +1,5 @@
 import sys
-sys.path.append("/root/SSAE-training")
+sys.path.append("/root/specialised-SAEs/")
 from sae_lens.config import LanguageModelSAERunnerConfig
 from sae_lens.training.training_sae import TrainingSAEConfig, TrainingSAE
 from sae_lens.sae import SAE
@@ -14,7 +14,7 @@ lr_warm_up_steps = 0
 lr_decay_steps = total_training_steps // 5  # 20% of training
 l1_warm_up_steps = total_training_steps // 20  # 5% of training
 
-for l1_coefficient in [30, 20]:
+for l1_coefficient in [40]:
     cfg = LanguageModelSAERunnerConfig(
         # JACOB
         gsae_path = None,

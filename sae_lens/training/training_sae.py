@@ -35,6 +35,9 @@ class TrainStepOutput:
 class TrainingSAEConfig(SAEConfig):
     # JACOB
     gsae_path : Optional[str]
+    control_dataset_path : Optional[str]
+    control_mixture : float
+    is_control_dataset_tokenized : bool
 
     # Sparsity Loss Calculations
     l1_coefficient: float
@@ -56,6 +59,9 @@ class TrainingSAEConfig(SAEConfig):
         return cls(
             # JACOB
             gsae_path = cfg.gsae_path,
+            control_dataset_path = cfg.control_dataset_path,
+            control_mixture=cfg.control_mixture,
+            is_control_dataset_tokenized = cfg.is_control_dataset_tokenized,
 
             # base config
             architecture=cfg.architecture,
@@ -132,7 +138,12 @@ class TrainingSAEConfig(SAEConfig):
             "dataset_path": self.dataset_path,
             "dataset_trust_remote_code": self.dataset_trust_remote_code,
             "sae_lens_training_version": self.sae_lens_training_version,
-            "gsae_path" : self.gsae_path
+
+            # JACOB
+            "gsae_path" : self.gsae_path,
+            "control_dataset_path" : self.control_dataset_path,
+            "control_mixture" : self.control_mixture,
+            "is_control_dataset_tokenized" : self.is_control_dataset_tokenized
         }
 
 
@@ -156,8 +167,10 @@ class TrainingSAE(SAE):
         # JACOB
         self.gsae = None
         if cfg.gsae_path:
-            with open(cfg.gsae_path, 'rb') as f:
-                self.gsae = dill.load(f)
+            self.gsae = SAE.load_from_pretrained(cfg.gsae_path, device=cfg.device)
+
+        if (cfg.gsae_path is None) and (cfg.control_dataset_path):
+            raise ValueError("control dataset was supplied but no GSAE was given")
 
         self.encode_with_hidden_pre_fn = (
             self.encode_with_hidden_pre
@@ -278,13 +291,19 @@ class TrainingSAE(SAE):
 
         # JACOB
         if self.gsae:
-            target = sae_in - self.gsae(sae_in)
+            # TODO split by data type
+            assert len(sae_in.shape) == 2 # expect [batch d_model] -- but could be inst?
+            control_batch_size = int(sae_in.size(0) * self.cfg.control_mixture)
+            target = sae_in - self.gsae(sae_in) 
+            target[:control_batch_size] = 0 # for the control dataset, we want the SSAE to output 0
         else:
             target = sae_in
 
-        # MSE LOSS
+        # MSE LOSS and control_regulariser loss
         per_item_mse_loss = self.mse_loss_fn(sae_out, target)
         mse_loss = per_item_mse_loss.sum(dim=-1).mean()
+
+        # 
 
         # GHOST GRADS
         if self.cfg.use_ghost_grads and self.training and dead_neuron_mask is not None:

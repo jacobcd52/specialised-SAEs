@@ -29,7 +29,10 @@ from sae_lens.sae import SAE
 HfDataset = DatasetDict | Dataset | IterableDatasetDict | IterableDataset
 
 
-# TODO: Make an activation store config class to be consistent with the rest of the code.
+# Import additional modules if required
+from datasets import load_dataset
+from typing import Union
+
 class ActivationsStore:
     """
     Class for streaming tokens and generating and storing activations
@@ -38,8 +41,10 @@ class ActivationsStore:
 
     model: HookedRootModule
     dataset: HfDataset
+    control_dataset: HfDataset
     cached_activations_path: str | None
     tokens_column: Literal["tokens", "input_ids", "text"]
+    control_tokens_column: Literal["tokens", "input_ids", "text"]
     hook_name: str
     hook_layer: int
     hook_head_index: int | None
@@ -55,15 +60,18 @@ class ActivationsStore:
         dataset: HfDataset | None = None,
     ) -> "ActivationsStore":
         cached_activations_path = cfg.cached_activations_path
-        # set cached_activations_path to None if we're not using cached activations
         if (
             isinstance(cfg, LanguageModelSAERunnerConfig)
             and not cfg.use_cached_activations
         ):
             cached_activations_path = None
+
         return cls(
             model=model,
             dataset=dataset or cfg.dataset_path,
+            control_dataset_path=getattr(cfg, 'control_dataset_path', None),
+            control_mixture=getattr(cfg, 'control_mixture', 0.0),
+            is_control_dataset_tokenized=getattr(cfg, 'is_control_dataset_tokenized', False),
             streaming=cfg.streaming,
             hook_name=cfg.hook_name,
             hook_layer=cfg.hook_layer,
@@ -84,43 +92,50 @@ class ActivationsStore:
             dataset_trust_remote_code=cfg.dataset_trust_remote_code,
         )
 
-    @classmethod
-    def from_sae(
-        cls,
-        model: HookedRootModule,
-        sae: SAE,
-        streaming: bool = True,
-        store_batch_size_prompts: int = 8,
-        n_batches_in_buffer: int = 8,
-        train_batch_size_tokens: int = 4096,
-        total_tokens: int = 10**9,
-        device: str = "cpu",
-    ) -> "ActivationsStore":
 
-        return cls(
-            model=model,
-            dataset=sae.cfg.dataset_path,
-            d_in=sae.cfg.d_in,
-            hook_name=sae.cfg.hook_name,
-            hook_layer=sae.cfg.hook_layer,
-            hook_head_index=sae.cfg.hook_head_index,
-            context_size=sae.cfg.context_size,
-            prepend_bos=sae.cfg.prepend_bos,
-            streaming=streaming,
-            store_batch_size_prompts=store_batch_size_prompts,
-            train_batch_size_tokens=train_batch_size_tokens,
-            n_batches_in_buffer=n_batches_in_buffer,
-            total_training_tokens=total_tokens,
-            normalize_activations=sae.cfg.normalize_activations,
-            dataset_trust_remote_code=sae.cfg.dataset_trust_remote_code,
-            dtype=sae.cfg.dtype,
-            device=torch.device(device),
-        )
+    # @classmethod
+    # def from_sae(
+    #     cls,
+    #     model: HookedRootModule,
+    #     sae: SAE,
+    #     streaming: bool = True,
+    #     store_batch_size_prompts: int = 8,
+    #     n_batches_in_buffer: int = 8,
+    #     train_batch_size_tokens: int = 4096,
+    #     total_tokens: int = 10**9,
+    #     device: str = "cpu",
+    # ) -> "ActivationsStore":
+
+    #     return cls(
+    #         model=model,
+    #         dataset=sae.cfg.dataset_path,
+    #         control_dataset=sae.cfg.control_dataset_path,
+    #         control_mixture=sae.cfg.control_mixture,
+    #         is_control_dataset_tokenized=sae.cfg.is_control_dataset_tokenized,
+    #         d_in=sae.cfg.d_in,
+    #         hook_name=sae.cfg.hook_name,
+    #         hook_layer=sae.cfg.hook_layer,
+    #         hook_head_index=sae.cfg.hook_head_index,
+    #         context_size=sae.cfg.context_size,
+    #         prepend_bos=sae.cfg.prepend_bos,
+    #         streaming=streaming,
+    #         store_batch_size_prompts=store_batch_size_prompts,
+    #         train_batch_size_tokens=train_batch_size_tokens,
+    #         n_batches_in_buffer=n_batches_in_buffer,
+    #         total_training_tokens=total_tokens,
+    #         normalize_activations=sae.cfg.normalize_activations,
+    #         dataset_trust_remote_code=sae.cfg.dataset_trust_remote_code,
+    #         dtype=sae.cfg.dtype,
+    #         device=torch.device(device),
+    #     )
 
     def __init__(
         self,
         model: HookedRootModule,
         dataset: HfDataset | str,
+        control_dataset_path: str,
+        control_mixture: float,
+        is_control_dataset_tokenized: bool,
         streaming: bool,
         hook_name: str,
         hook_layer: int,
@@ -154,6 +169,22 @@ class ActivationsStore:
             if isinstance(dataset, str)
             else dataset
         )
+        self.control_dataset = (
+            load_dataset(
+                control_dataset_path,
+                split="train",
+                streaming=streaming,
+                trust_remote_code=dataset_trust_remote_code,  # type: ignore
+            )
+            if control_dataset_path
+            else None
+        )
+        if self.control_dataset:
+            print("using control dataset")
+        else:
+            print("no control dataset!")
+        self.control_mixture = control_mixture if control_dataset_path else 0.0
+        self.is_control_dataset_tokenized = is_control_dataset_tokenized if control_dataset_path else False
         self.hook_name = hook_name
         self.hook_layer = hook_layer
         self.hook_head_index = hook_head_index
@@ -172,13 +203,12 @@ class ActivationsStore:
 
         self.n_dataset_processed = 0
         self.iterable_dataset = iter(self.dataset)
+        self.iterable_control_dataset = iter(self.control_dataset) if self.control_dataset else None
 
         self.estimated_norm_scaling_factor = 1.0
 
-        # Check if dataset is tokenized
+        # Check if main dataset is tokenized
         dataset_sample = next(self.iterable_dataset)
-
-        # check if it's tokenized
         if "tokens" in dataset_sample.keys():
             self.is_dataset_tokenized = True
             self.tokens_column = "tokens"
@@ -190,16 +220,30 @@ class ActivationsStore:
             self.tokens_column = "text"
         else:
             raise ValueError(
-                "Dataset must have a 'tokens', 'input_ids', or 'text' column."
+                "Main dataset must have a 'tokens', 'input_ids', or 'text' column."
             )
         self.iterable_dataset = iter(self.dataset)  # Reset iterator after checking
 
+        if self.control_dataset:
+            control_dataset_sample = next(self.iterable_control_dataset)
+            if "tokens" in control_dataset_sample.keys():
+                self.control_tokens_column = "tokens"
+            elif "input_ids" in control_dataset_sample.keys():
+                self.control_tokens_column = "input_ids"
+            elif "text" in control_dataset_sample.keys():
+                self.control_tokens_column = "text"
+            else:
+                raise ValueError(
+                    "Control dataset must have a 'tokens', 'input_ids', or 'text' column."
+                )
+            self.iterable_control_dataset = iter(self.control_dataset)  # Reset iterator
+
         self.check_cached_activations_against_config()
 
-        # TODO add support for "mixed loading" (ie use cache until you run out, then switch over to streaming from HF)
+
+
 
     def check_cached_activations_against_config(self):
-
         if self.cached_activations_path is not None:  # EDIT: load from multi-layer acts
             assert self.cached_activations_path is not None  # keep pyright happy
             # Sanity check: does the cache directory exist?
@@ -263,7 +307,7 @@ class ActivationsStore:
 
     def get_batch_tokens(self, batch_size: int | None = None):
         """
-        Streams a batch of tokens from a dataset.
+        Streams a batch of tokens from the main dataset.
         """
         if not batch_size:
             batch_size = self.store_batch_size_prompts
@@ -328,9 +372,81 @@ class ActivationsStore:
                     current_batch = []
                     current_length = 0
 
-            # pbar.n = batch_tokens.shape[0]
-            # pbar.refresh()
         return batch_tokens[:batch_size].to(self.model.W_E.device)
+
+
+    def get_control_batch_tokens(self, batch_size: int | None = None):
+        """
+        Streams a batch of tokens from the control dataset.
+        """
+        if self.control_dataset is None:
+            raise ValueError("Control dataset is not provided.")
+
+        if not batch_size:
+            batch_size = self.store_batch_size_prompts
+        context_size = self.context_size
+        device = self.device
+
+        batch_tokens = torch.zeros(
+            size=(0, context_size), device=device, dtype=torch.long, requires_grad=False
+        )
+
+        current_batch = []
+        current_length = 0
+
+        while batch_tokens.shape[0] < batch_size:
+            tokens = self._get_next_control_dataset_tokens()
+            token_len = tokens.shape[0]
+
+            # TODO: Fix this so that we are limiting how many tokens we get from the same context.
+            assert self.model.tokenizer is not None  # keep pyright happy
+            while token_len > 0 and batch_tokens.shape[0] < batch_size:
+                # Space left in the current batch
+                space_left = context_size - current_length
+
+                # If the current tokens fit entirely into the remaining space
+                if token_len <= space_left:
+                    current_batch.append(tokens[:token_len])
+                    current_length += token_len
+                    break
+
+                else:
+                    # Take as much as will fit
+                    current_batch.append(tokens[:space_left])
+
+                    # Remove used part, add BOS
+                    tokens = tokens[space_left:]
+                    token_len -= space_left
+
+                    # only add BOS if it's not already the first token
+                    if self.prepend_bos:
+                        bos_token_id_tensor = torch.tensor(
+                            [self.model.tokenizer.bos_token_id],
+                            device=tokens.device,
+                            dtype=torch.long,
+                        )
+                        if tokens[0] != bos_token_id_tensor:
+                            tokens = torch.cat(
+                                (
+                                    bos_token_id_tensor,
+                                    tokens,
+                                ),
+                                dim=0,
+                            )
+                            token_len += 1
+                    current_length = context_size
+
+                # If a batch is full, concatenate and move to next batch
+                if current_length == context_size:
+                    full_batch = torch.cat(current_batch, dim=0)
+                    batch_tokens = torch.cat(
+                        (batch_tokens, full_batch.unsqueeze(0)), dim=0
+                    )
+                    current_batch = []
+                    current_length = 0
+
+        return batch_tokens[:batch_size].to(self.model.W_E.device)
+
 
     @torch.no_grad()
     def get_activations(self, batch_tokens: torch.Tensor):
@@ -383,13 +499,11 @@ class ActivationsStore:
         context_size = self.context_size
         batch_size = self.store_batch_size_prompts
         d_in = self.d_in
-        total_size = batch_size * n_batches_in_buffer
         num_layers = 1
+        total_tokens = batch_size * n_batches_in_buffer * context_size
 
         if self.cached_activations_path is not None:
-            # Load the activations from disk
-            buffer_size = total_size * context_size
-            # Initialize an empty tensor with an additional dimension for layers
+            buffer_size = total_tokens
             new_buffer = torch.zeros(
                 (buffer_size, num_layers, d_in),
                 dtype=self.dtype,  # type: ignore
@@ -397,37 +511,23 @@ class ActivationsStore:
             )
             n_tokens_filled = 0
 
-            # Assume activations for different layers are stored separately and need to be combined
             while n_tokens_filled < buffer_size:
-                if not os.path.exists(
-                    f"{self.cached_activations_path}/{self.next_cache_idx}.safetensors"
-                ):
-                    print(
-                        "\n\nWarning: Ran out of cached activation files earlier than expected."
-                    )
-                    print(
-                        f"Expected to have {buffer_size} activations, but only found {n_tokens_filled}."
-                    )
+                if not os.path.exists(f"{self.cached_activations_path}/{self.next_cache_idx}.safetensors"):
+                    print("\n\nWarning: Ran out of cached activation files earlier than expected.")
+                    print(f"Expected to have {buffer_size} activations, but only found {n_tokens_filled}.")
                     if buffer_size % self.total_training_tokens != 0:
-                        print(
-                            "This might just be a rounding error — your batch_size * n_batches_in_buffer * context_size is not divisible by your total_training_tokens"
-                        )
+                        print("This might just be a rounding error — your batch_size * n_batches_in_buffer * context_size is not divisible by your total_training_tokens")
                     print(f"Returning a buffer of size {n_tokens_filled} instead.")
-                    print("\n\n")
                     new_buffer = new_buffer[:n_tokens_filled, ...]
                     return new_buffer
 
-                activations = self.load_buffer(
-                    f"{self.cached_activations_path}/{self.next_cache_idx}.safetensors"
-                )
+                activations = self.load_buffer(f"{self.cached_activations_path}/{self.next_cache_idx}.safetensors")
                 taking_subset_of_file = False
                 if n_tokens_filled + activations.shape[0] > buffer_size:
                     activations = activations[: buffer_size - n_tokens_filled, ...]
                     taking_subset_of_file = True
 
-                new_buffer[
-                    n_tokens_filled : n_tokens_filled + activations.shape[0], ...
-                ] = activations
+                new_buffer[n_tokens_filled : n_tokens_filled + activations.shape[0], ...] = activations
 
                 if taking_subset_of_file:
                     self.next_idx_within_buffer = activations.shape[0]
@@ -439,34 +539,80 @@ class ActivationsStore:
 
             return new_buffer
 
-        refill_iterator = range(0, batch_size * n_batches_in_buffer, batch_size)
-        # Initialize empty tensor buffer of the maximum required size with an additional dimension for layers
+        refill_iterator = range(0, total_tokens, batch_size * context_size)
         new_buffer = torch.zeros(
-            (total_size, context_size, num_layers, d_in),
+            (total_tokens, num_layers, d_in),
             dtype=self.dtype,  # type: ignore
             device=self.device,
         )
 
+        control_activations_list = []
+        main_activations_list = []
+
         for refill_batch_idx_start in refill_iterator:
-            # move batch toks to gpu for model
-            refill_batch_tokens = self.get_batch_tokens().to(self.model.cfg.device)
-            refill_activations = self.get_activations(refill_batch_tokens)
-            # move acts back to cpu
-            refill_activations.to(self.device)
-            new_buffer[
-                refill_batch_idx_start : refill_batch_idx_start + batch_size, ...
-            ] = refill_activations
+            if self.control_dataset:
+                main_batch_size = int(batch_size * (1 - self.control_mixture))
+                control_batch_size = batch_size - main_batch_size
 
-            # pbar.update(1)
+                try:
+                    refill_main_batch_tokens = self.get_batch_tokens(main_batch_size).to(self.model.cfg.device)
+                    refill_control_batch_tokens = self.get_control_batch_tokens(control_batch_size).to(self.model.cfg.device)
+                except StopIteration:
+                    print("Warning: Dataset exhausted during refill. Exiting refill loop.")
+                    break
 
-        new_buffer = new_buffer.reshape(-1, num_layers, d_in)
-        new_buffer = new_buffer[torch.randperm(new_buffer.shape[0])]
+                if refill_main_batch_tokens.shape[0] == 0 or refill_control_batch_tokens.shape[0] == 0:
+                    print("Warning: Empty batch tokens encountered. Exiting refill loop.")
+                    break
 
-        # every buffer should be normalized:
-        if self.normalize_activations == "expected_average_only_in":
-            new_buffer = self.apply_norm_scaling_factor(new_buffer)
+                refill_main_activations = self.get_activations(refill_main_batch_tokens).view(-1, num_layers, d_in)
+                refill_control_activations = self.get_activations(refill_control_batch_tokens).view(-1, num_layers, d_in)
+
+                control_activations_list.append(refill_control_activations)
+                main_activations_list.append(refill_main_activations)
+
+            else:
+                try:
+                    refill_batch_tokens = self.get_batch_tokens(batch_size).to(self.model.cfg.device)
+                except StopIteration:
+                    print("Warning: Dataset exhausted during refill. Exiting refill loop.")
+                    break
+
+                if refill_batch_tokens.shape[0] == 0:
+                    print("Warning: Empty batch tokens encountered. Exiting refill loop.")
+                    break
+
+                refill_batch_activations = self.get_activations(refill_batch_tokens).view(-1, num_layers, d_in)
+                main_activations_list.append(refill_batch_activations)
+
+
+        if self.control_dataset:
+            if len(control_activations_list) > 0:
+                control_activations = torch.cat(control_activations_list, dim=0)
+                control_activations = control_activations[torch.randperm(control_activations.shape[0])]
+                new_buffer[:control_activations.shape[0]] = control_activations
+
+            if len(main_activations_list) > 0:
+                main_activations = torch.cat(main_activations_list, dim=0)
+                main_activations = main_activations[torch.randperm(main_activations.shape[0])]
+                if control_activations.shape[0] + main_activations.shape[0] <= new_buffer.shape[0]:
+                    new_buffer[control_activations.shape[0]:control_activations.shape[0] + main_activations.shape[0]] = main_activations
+                else:
+                    print(f"Warning: Main activations exceed buffer size. Adjusting to fit.")
+                    main_activations = main_activations[:new_buffer.shape[0] - control_activations.shape[0]]
+                    new_buffer[control_activations.shape[0]:control_activations.shape[0] + main_activations.shape[0]] = main_activations
+        else:
+            if len(main_activations_list) > 0:
+                main_activations = torch.cat(main_activations_list, dim=0)
+                main_activations = main_activations[torch.randperm(main_activations.shape[0])]
+                new_buffer = main_activations
 
         return new_buffer
+
+
+
+
+
 
     def save_buffer(self, buffer: torch.Tensor, path: str):
         """
@@ -544,7 +690,20 @@ class ActivationsStore:
     def _get_next_dataset_tokens(self) -> torch.Tensor:
         device = self.device
         if not self.is_dataset_tokenized:
-            s = next(self.iterable_dataset)[self.tokens_column]
+            while True:
+                try:
+                    s = next(self.iterable_dataset)[self.tokens_column]
+                    if s is not None:
+                        break
+                except StopIteration:
+                    # Handle the case where there are no more elements in the iterator
+                    s = ""
+                    print("no more elements in the iterator")
+                    break
+
+            # if s is None:
+            #     s = ""
+            # assert not (s is None), "Clean your dataset"
             tokens = (
                 self.model.to_tokens(
                     s,
@@ -572,3 +731,45 @@ class ActivationsStore:
                 tokens = tokens[1:]
         self.n_dataset_processed += 1
         return tokens
+
+    def _get_next_control_dataset_tokens(self) -> torch.Tensor:
+        device = self.device
+        if not self.is_control_dataset_tokenized:
+            s = next(self.iterable_control_dataset)[self.control_tokens_column]
+            tokens = (
+                self.model.to_tokens(
+                    s,
+                    truncate=False,
+                    move_to_device=True,
+                    prepend_bos=self.prepend_bos,
+                )
+                .squeeze(0)
+                .to(device)
+            )
+            assert (
+                len(tokens.shape) == 1
+            ), f"tokens.shape should be 1D but was {tokens.shape}"
+        else:
+            tokens = torch.tensor(
+                next(self.iterable_control_dataset)[self.control_tokens_column],
+                dtype=torch.long,
+                device=device,
+                requires_grad=False,
+            )
+            if self.prepend_bos:
+                bos_token_id_tensor = torch.tensor(
+                    [self.model.tokenizer.bos_token_id],
+                    device=tokens.device,
+                    dtype=torch.long,
+                )
+                if tokens[0] != bos_token_id_tensor:
+                    tokens = torch.cat(
+                        (
+                            bos_token_id_tensor,
+                            tokens,
+                        ),
+                        dim=0,
+                    )
+        self.n_dataset_processed += 1
+        return tokens
+

@@ -107,6 +107,9 @@ class LanguageModelSAERunnerConfig:
     """
     # JACOB
     gsae_path : Optional[str] = None
+    control_dataset_path : Optional[str] = None
+    is_control_dataset_tokenized : bool = True
+    control_mixture : float = 0.01
 
     # Data Generating Function (Model + Training Distibuion)
     model_name: str = "gelu-2l"
@@ -386,8 +389,12 @@ class LanguageModelSAERunnerConfig:
             "decoder_heuristic_init": self.decoder_heuristic_init,
             "init_encoder_as_decoder_transpose": self.init_encoder_as_decoder_transpose,
             "normalize_activations": self.normalize_activations,
-            "gsae_path" : self.gsae_path
-            
+
+            # JACOB
+            "gsae_path" : self.gsae_path,
+            "control_dataset_path" : self.control_dataset_path,
+            "is_control_dataset_tokenized" : self.is_control_dataset_tokenized,
+            "control_mixture" : self.control_mixture
         }
 
     def to_dict(self) -> dict[str, Any]:
