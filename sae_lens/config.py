@@ -26,6 +26,13 @@ class LanguageModelSAERunnerConfig:
     Configuration for training a sparse autoencoder on a language model.
 
     Args:
+        JACOB'S ADDITIONS:
+        gsae_path (str): Huggingface path to raw GSAE weights, without the ".safetensors" suffix. E.g. "https://huggingface.co/jacobcd52/mats-saes/raw/main/gpt2_resid_8_gated_gsae"
+        control_dataset_path (str): Huggingface repo name containing an unstructured dataset used as a control. E.g. "NeelNanda/openwebtext-tokenized-9b
+        is_control_dataset_tokenized (bool): self-explanatory
+        control_mixture (float): The fraction of each batch of activations fed to the SAE which came from the control dataset.
+
+        # pre-existing stuff
         model_name (str): The name of the model to use. This should be the name of the model in the Hugging Face model hub.
         model_class_name (str): The name of the class of the model to use. This should be either `HookedTransformer` or `HookedMamba`.
         hook_name (str): The name of the hook to use. This should be a valid TransformerLens hook.
@@ -106,7 +113,8 @@ class LanguageModelSAERunnerConfig:
         model_from_pretrained_kwargs (dict[str, Any]): Additional keyword arguments for the model from pretrained.
     """
     # JACOB
-    gsae_path : Optional[str] = None
+    gsae_repo : Optional[str] = None
+    gsae_filename_no_suffix : Optional[str] = None
     control_dataset_path : Optional[str] = None
     is_control_dataset_tokenized : bool = True
     control_mixture : float = 0.01
@@ -391,7 +399,8 @@ class LanguageModelSAERunnerConfig:
             "normalize_activations": self.normalize_activations,
 
             # JACOB
-            "gsae_path" : self.gsae_path,
+            "gsae_repo" : self.gsae_repo,
+            "gsae_filename_no_suffix" : self.gsae_filename_no_suffix,
             "control_dataset_path" : self.control_dataset_path,
             "is_control_dataset_tokenized" : self.is_control_dataset_tokenized,
             "control_mixture" : self.control_mixture

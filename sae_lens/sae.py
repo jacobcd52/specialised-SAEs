@@ -428,6 +428,8 @@ class SAE(HookedRootModule):
         config_path = os.path.join(path, "cfg.json")
         weight_path = os.path.join(path, "sae_weights.safetensors")
 
+        print(config_path, weight_path)
+
         cfg_dict, state_dict, _ = load_pretrained_sae_lens_sae_components(
             config_path, weight_path, device, dtype
         )

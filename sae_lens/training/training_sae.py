@@ -5,12 +5,16 @@ https://github.com/ArthurConmy/sae/blob/main/sae/model.py
 import os
 from dataclasses import dataclass
 from typing import Any, Optional
-import dill
+import requests
 
 import einops
 import torch
 from jaxtyping import Float
 from torch import nn
+from safetensors import safe_open
+import json
+from huggingface_hub import hf_hub_download
+
 
 from sae_lens.config import LanguageModelSAERunnerConfig
 from sae_lens.sae import SAE, SAEConfig
@@ -34,7 +38,8 @@ class TrainStepOutput:
 @dataclass
 class TrainingSAEConfig(SAEConfig):
     # JACOB
-    gsae_path : Optional[str]
+    gsae_repo : Optional[str]
+    gsae_filename_no_suffix : Optional[str]
     control_dataset_path : Optional[str]
     control_mixture : float
     is_control_dataset_tokenized : bool
@@ -58,7 +63,8 @@ class TrainingSAEConfig(SAEConfig):
 
         return cls(
             # JACOB
-            gsae_path = cfg.gsae_path,
+            gsae_repo = cfg.gsae_repo,
+            gsae_filename_no_suffix = cfg.gsae_filename_no_suffix,
             control_dataset_path = cfg.control_dataset_path,
             control_mixture=cfg.control_mixture,
             is_control_dataset_tokenized = cfg.is_control_dataset_tokenized,
@@ -140,12 +146,15 @@ class TrainingSAEConfig(SAEConfig):
             "sae_lens_training_version": self.sae_lens_training_version,
 
             # JACOB
-            "gsae_path" : self.gsae_path,
+            "gsae_repo" : self.gsae_repo,
+            "gsae_filename_no_suffix" : self.gsae_filename_no_suffix,
             "control_dataset_path" : self.control_dataset_path,
             "control_mixture" : self.control_mixture,
             "is_control_dataset_tokenized" : self.is_control_dataset_tokenized
         }
 
+
+from huggingface_hub import hf_hub_download
 
 class TrainingSAE(SAE):
     """
@@ -165,12 +174,8 @@ class TrainingSAE(SAE):
         self.cfg = cfg  # type: ignore
 
         # JACOB
-        self.gsae = None
-        if cfg.gsae_path:
-            self.gsae = SAE.load_from_pretrained(cfg.gsae_path, device=cfg.device)
-
-        if (cfg.gsae_path is None) and (cfg.control_dataset_path):
-            raise ValueError("control dataset was supplied but no GSAE was given")
+        self.load_gsae()
+        #
 
         self.encode_with_hidden_pre_fn = (
             self.encode_with_hidden_pre
@@ -189,6 +194,62 @@ class TrainingSAE(SAE):
         self.turn_off_forward_pass_hook_z_reshaping()
 
         self.mse_loss_fn = self._get_mse_loss_fn()
+
+    def load_gsae(self):
+        # JACOB get gsae from huggingface
+        self.gsae = None
+
+        if self.cfg.gsae_repo:
+            print("loading gsae")
+
+            # Make a directory to store the weights and cfg
+            temp_gsae_path = "temp_gsae"
+            os.makedirs(temp_gsae_path, exist_ok=True)
+            print(f"Created directory: {temp_gsae_path}")
+
+            # Define the local paths for the files
+            temp_weights_path = os.path.join(temp_gsae_path, "sae_weights.safetensors")
+            temp_cfg_path = os.path.join(temp_gsae_path, "cfg.json")
+            
+            try:
+                # Download weights
+                print(f"Downloading weights from Hugging Face Hub")
+                downloaded_weights_path = hf_hub_download(
+                    repo_id=self.cfg.gsae_repo, 
+                    filename=f"{self.cfg.gsae_filename_no_suffix}.safetensors", 
+                    local_dir=temp_gsae_path
+                )
+                os.rename(downloaded_weights_path, temp_weights_path)
+                print(f"GSAE weights file saved as {temp_weights_path}")
+
+                # Download cfg
+                print(f"Downloading cfg from Hugging Face Hub")
+                downloaded_cfg_path = hf_hub_download(
+                    repo_id=self.cfg.gsae_repo, 
+                    filename=f"{self.cfg.gsae_filename_no_suffix}_cfg.json", 
+                    local_dir=temp_gsae_path
+                )
+                os.rename(downloaded_cfg_path, temp_cfg_path)
+                print(f"GSAE cfg file saved as {temp_cfg_path}")
+            except Exception as e:
+                print(f"Error downloading weights or cfg: {e}")
+
+            # Load weights into GSAE
+            print(f"Loading weights into GSAE from {temp_weights_path}")                
+            self.gsae = SAE.load_from_pretrained(temp_gsae_path, device=self.cfg.device)
+            if self.gsae:
+                print("success! gsae was loaded")
+            else:
+                print("failure -- gsae was not loaded")
+                
+            print("finished loading gsae")
+
+        if not self.cfg.gsae_repo and self.cfg.control_dataset_path:
+            raise ValueError("control dataset was supplied but no GSAE was given")
+
+
+
+        
 
     @classmethod
     def from_dict(cls, config_dict: dict[str, Any]) -> "TrainingSAE":

@@ -546,8 +546,7 @@ class ActivationsStore:
             device=self.device,
         )
 
-        control_activations_list = []
-        main_activations_list = []
+        all_activations_list = []
 
         for refill_batch_idx_start in refill_iterator:
             if self.control_dataset:
@@ -565,11 +564,17 @@ class ActivationsStore:
                     print("Warning: Empty batch tokens encountered. Exiting refill loop.")
                     break
 
-                refill_main_activations = self.get_activations(refill_main_batch_tokens).view(-1, num_layers, d_in)
-                refill_control_activations = self.get_activations(refill_control_batch_tokens).view(-1, num_layers, d_in)
+                # Combine the tokens
+                combined_batch_tokens = torch.cat((refill_control_batch_tokens, refill_main_batch_tokens), dim=0)
 
-                control_activations_list.append(refill_control_activations)
-                main_activations_list.append(refill_main_activations)
+                # Get the activations in a single forward pass
+                combined_activations = self.get_activations(combined_batch_tokens).view(-1, num_layers, d_in)
+
+                # Split the activations back into control and main
+                control_activations = combined_activations[:control_batch_size * context_size]
+                main_activations = combined_activations[control_batch_size * context_size:]
+
+                all_activations_list.append((control_activations, main_activations))
 
             else:
                 try:
@@ -583,8 +588,10 @@ class ActivationsStore:
                     break
 
                 refill_batch_activations = self.get_activations(refill_batch_tokens).view(-1, num_layers, d_in)
-                main_activations_list.append(refill_batch_activations)
+                all_activations_list.append((None, refill_batch_activations))
 
+        control_activations_list = [act[0] for act in all_activations_list if act[0] is not None]
+        main_activations_list = [act[1] for act in all_activations_list]
 
         if self.control_dataset:
             if len(control_activations_list) > 0:
@@ -608,6 +615,7 @@ class ActivationsStore:
                 new_buffer = main_activations
 
         return new_buffer
+
 
 
 
