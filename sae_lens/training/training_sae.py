@@ -29,7 +29,8 @@ class TrainStepOutput:
     sae_out: torch.Tensor
     feature_acts: torch.Tensor
     loss: torch.Tensor  # we need to call backwards on this
-    mse_loss: float
+    main_mse_loss: float
+    control_mse_loss: float
     l1_loss: float
     ghost_grad_loss: float
     auxiliary_reconstruction_loss: float = 0.0
@@ -237,10 +238,8 @@ class TrainingSAE(SAE):
             # Load weights into GSAE
             print(f"Loading weights into GSAE from {temp_weights_path}")                
             self.gsae = SAE.load_from_pretrained(temp_gsae_path, device=self.cfg.device)
-            if self.gsae:
-                print("success! gsae was loaded")
-            else:
-                print("failure -- gsae was not loaded")
+            assert(self.gsae.use_error_term == False)
+            assert self.gsae, "GSAE not loaded"
                 
             print("finished loading gsae")
 
@@ -352,17 +351,24 @@ class TrainingSAE(SAE):
 
         # JACOB
         if self.gsae:
-            # TODO split by data type
             assert len(sae_in.shape) == 2 # expect [batch d_model]
             control_batch_size = int(sae_in.size(0) * self.cfg.control_mixture)
+            # get sum of main MSE loss and control loss
             target = sae_in - self.gsae(sae_in) 
             target[:control_batch_size] = 0 # for the control dataset, we want the SSAE to output 0
+            per_item_mse_loss = self.mse_loss_fn(sae_out, target)
+
+            # calculate control and main losses for logging
+            mse_loss = per_item_mse_loss.sum(dim=-1).mean()
+            control_mse_loss = per_item_mse_loss[:control_batch_size].sum(dim=-1).mean()
+            main_mse_loss = per_item_mse_loss[control_batch_size:].sum(dim=-1).mean()
+
         else:
             target = sae_in
-
-        # MSE LOSS and control_regulariser loss
-        per_item_mse_loss = self.mse_loss_fn(sae_out, target)
-        mse_loss = per_item_mse_loss.sum(dim=-1).mean()
+            per_item_mse_loss = self.mse_loss_fn(sae_out, target)
+            mse_loss = per_item_mse_loss.sum(dim=-1).mean()
+            control_mse_loss = torch.tensor(0.0)
+            main_mse_loss = mse_loss
 
         # 
 
@@ -400,7 +406,7 @@ class TrainingSAE(SAE):
             # Auxiliary reconstruction loss - summed over the feature dimension and averaged over the batch
             via_gate_reconstruction = pi_gate_act @ self.W_dec + self.b_dec
             aux_reconstruction_loss = torch.sum(
-                (via_gate_reconstruction - sae_in) ** 2, dim=-1
+                (via_gate_reconstruction - target) ** 2, dim=-1
             ).mean()
 
             loss = mse_loss + l1_loss + aux_reconstruction_loss
@@ -421,7 +427,8 @@ class TrainingSAE(SAE):
             sae_out=sae_out,
             feature_acts=feature_acts,
             loss=loss,
-            mse_loss=mse_loss.item(),
+            control_mse_loss=control_mse_loss.item(),
+            main_mse_loss=main_mse_loss.item(),
             l1_loss=l1_loss.item(),
             ghost_grad_loss=(
                 ghost_grad_loss.item()

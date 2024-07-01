@@ -155,9 +155,6 @@ class SAETrainer:
 
         # Train loop
         while self.n_training_tokens < self.cfg.total_training_tokens:
-            print()
-            print("start step")
-            print("used tokens = ", self.n_training_tokens)
             # Do a training step.
             layer_acts = self.activation_store.next_batch()[:, 0, :].to(self.sae.device)
             self.n_training_tokens += self.cfg.train_batch_size_tokens
@@ -174,9 +171,6 @@ class SAETrainer:
 
             ### If n_training_tokens > sae_group.cfg.training_tokens, then we should switch to fine-tuning (if we haven't already)
             self._begin_finetuning_if_needed()
-
-            print("end step")
-            print()
 
 
         # save final sae group to checkpoints folder
@@ -274,7 +268,8 @@ class SAETrainer:
         sae_in = output.sae_in
         sae_out = output.sae_out
         feature_acts = output.feature_acts
-        mse_loss = output.mse_loss
+        control_mse_loss = output.control_mse_loss
+        main_mse_loss = output.main_mse_loss
         l1_loss = output.l1_loss
         ghost_grad_loss = output.ghost_grad_loss
         loss = output.loss.item()
@@ -291,7 +286,8 @@ class SAETrainer:
             ghost_grad_loss = ghost_grad_loss.item()
         return {
             # losses
-            "losses/mse_loss": mse_loss,
+            "losses/main_mse_loss": main_mse_loss,
+            "losses/control_mse_loss" : control_mse_loss,
             "losses/l1_loss": l1_loss
             / self.current_l1_coefficient,  # normalize by l1 coefficient
             "losses/auxiliary_reconstruction_loss": output.auxiliary_reconstruction_loss,
@@ -381,7 +377,7 @@ class SAETrainer:
 
         if self.n_training_steps % update_interval == 0:
             pbar.set_description(
-                f"{self.n_training_steps}| MSE Loss {step_output.mse_loss:.3f} | L1 {step_output.l1_loss:.3f}"
+                f"{self.n_training_steps}| main MSE Loss {step_output.main_mse_loss:.3f} | L1 {step_output.l1_loss:.3f}"
             )
             pbar.update(update_interval * self.cfg.train_batch_size_tokens)
 

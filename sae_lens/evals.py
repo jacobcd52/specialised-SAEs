@@ -22,7 +22,6 @@ def run_evals(
     hook_name = sae.cfg.hook_name
     hook_head_index = sae.cfg.hook_head_index
     ### Evals
-    eval_tokens = activation_store.get_batch_tokens(eval_batch_size_prompts)
 
     # TODO: Come up with a cleaner long term strategy here for SAEs that do reshaping.
     # turn off hook_z reshaping mode if it's on, and restore it after evals
@@ -41,55 +40,21 @@ def run_evals(
         eval_batch_size_prompts=eval_batch_size_prompts,
     )
 
-    recons_score = losses_df["score"].mean()
-    ntp_loss = losses_df["loss"].mean()
-    recons_loss = losses_df["recons_loss"].mean()
-    zero_abl_loss = losses_df["zero_abl_loss"].mean()
-
-    # get cache
-    _, cache = model.run_with_cache(
-        eval_tokens,
-        prepend_bos=False,
-        names_filter=[hook_name],
-        **model_kwargs,
-    )
-
-    # we would include hook z, except that we now have base SAE's
-    # which will do their own reshaping for hook z.
-    has_head_dim_key_substrings = ["hook_q", "hook_k", "hook_v", "hook_z"]
-    if hook_head_index is not None:
-        original_act = cache[hook_name][:, :, hook_head_index]
-    elif any(substring in hook_name for substring in has_head_dim_key_substrings):
-        original_act = cache[hook_name].flatten(-2, -1)
-    else:
-        original_act = cache[hook_name]
-
-    # normalise if necessary
-    if activation_store.normalize_activations == "expected_average_only_in":
-        original_act = activation_store.apply_norm_scaling_factor(original_act)
-
-    # send the (maybe normalised) activations into the SAE
-    sae_out = sae.decode(sae.encode(original_act.to(sae.device))).to(
-        original_act.device
-    )
-    del cache
-
-    l2_norm_in = torch.norm(original_act, dim=-1)
-    l2_norm_out = torch.norm(sae_out, dim=-1)
-    l2_norm_in_for_div = l2_norm_in.clone()
-    l2_norm_in_for_div[torch.abs(l2_norm_in_for_div) < 0.0001] = 1
-    l2_norm_ratio = l2_norm_out / l2_norm_in_for_div
+    main_loss = losses_df["main_loss"].mean()
+    main_recons_loss = losses_df["main_recons_loss"].mean()
+    main_zero_abl_loss = losses_df["main_zero_abl_loss"].mean()
+    control_loss = losses_df["control_loss"].mean()
+    control_recons_loss = losses_df["control_recons_loss"].mean()
+    control_zero_abl_loss = losses_df["control_zero_abl_loss"].mean()
 
     metrics = {
-        # l2 norms
-        "metrics/l2_norm": l2_norm_out.mean().item(),
-        "metrics/l2_ratio": l2_norm_ratio.mean().item(),
-        "metrics/l2_norm_in": l2_norm_in.mean().item(),
         # CE Loss
-        "metrics/CE_loss_score": recons_score,
-        "metrics/ce_loss_without_sae": ntp_loss,
-        "metrics/ce_loss_with_sae": recons_loss,
-        "metrics/ce_loss_with_ablation": zero_abl_loss,
+        "metrics/main_loss" : main_loss,
+        "metrics/control_loss" : control_loss,
+        "metrics/control_recons_loss": control_recons_loss,
+        "metrics/main_recons_loss": main_recons_loss,
+        "metrics/control_zero_abl_loss": control_zero_abl_loss,
+        "metrics/main_zero_abl_loss": main_zero_abl_loss,
     }
 
     # restore previous hook z reshaping mode if necessary
@@ -111,24 +76,46 @@ def recons_loss_batched(
 ):
     losses = []
     for _ in range(n_batches):
-        batch_tokens = activation_store.get_batch_tokens(eval_batch_size_prompts)
-        score, loss, recons_loss, zero_abl_loss = get_recons_loss(
+        main_batch_tokens = activation_store.get_batch_tokens(eval_batch_size_prompts)
+        main_loss, main_recons_loss, main_zero_abl_loss = get_recons_loss(
             sae,
             model,
-            batch_tokens,
+            main_batch_tokens,
             activation_store,
         )
+
+        if activation_store.control_dataset:
+            control_batch_tokens = activation_store.get_control_batch_tokens(eval_batch_size_prompts)
+            control_loss, control_recons_loss, control_zero_abl_loss = get_recons_loss(
+                sae,
+                model,
+                control_batch_tokens,
+                activation_store,
+            )
+        else:
+            control_loss = torch.tensor(0.0)
+            control_recons_loss = torch.tensor(0.0)
+            control_zero_abl_loss = torch.tensor(0.0)
+
         losses.append(
             (
-                score.mean().item(),
-                loss.mean().item(),
-                recons_loss.mean().item(),
-                zero_abl_loss.mean().item(),
+                main_loss.mean().item(),
+                main_recons_loss.mean().item(),
+                main_zero_abl_loss.mean().item(),
+                control_loss.mean().item(),
+                control_recons_loss.mean().item(), 
+                control_zero_abl_loss.mean().item(),
+
             )
         )
 
     losses = pd.DataFrame(
-        losses, columns=cast(Any, ["score", "loss", "recons_loss", "zero_abl_loss"])
+        losses, columns=cast(Any, ["main_loss", 
+                                   "main_recons_loss", 
+                                   "main_zero_abl_loss", 
+                                   "control_loss", 
+                                   "control_recons_loss", 
+                                   "control_zero_abl_loss"])
     )
 
     return losses
@@ -159,6 +146,10 @@ def get_recons_loss(
 
         # SAE class agnost forward forward pass.
         activations = sae.decode(sae.encode(activations)).to(activations.dtype)
+
+        # JACOB
+        if sae.gsae:
+            activations += sae.gsae(activations)
 
         # Unscale if activations were scaled prior to going into the SAE
         if activation_store.normalize_activations == "expected_average_only_in":
@@ -213,6 +204,11 @@ def get_recons_loss(
         original_device = activations.device
         activations = activations.to(sae.device)
         activations = torch.zeros_like(activations)
+
+        # JACOB
+        if sae.gsae:
+            activations += sae.gsae(activations)
+
         return activations.to(original_device)
 
     # we would include hook z, except that we now have base SAE's
@@ -233,6 +229,8 @@ def get_recons_loss(
         **model_kwargs,
     )
 
+    model.reset_hooks()
+
     zero_abl_loss = model.run_with_hooks(
         batch_tokens,
         return_type="loss",
@@ -240,9 +238,8 @@ def get_recons_loss(
         **model_kwargs,
     )
 
-    div_val = zero_abl_loss - loss
-    div_val[torch.abs(div_val) < 0.0001] = 1.0
+    # control_div_val = zero_abl_loss - loss
+    # div_val[torch.abs(div_val) < 0.0001] = 1.0
+    # score = (zero_abl_loss - recons_loss) / div_val
 
-    score = (zero_abl_loss - recons_loss) / div_val
-
-    return score, loss, recons_loss, zero_abl_loss
+    return loss, recons_loss, zero_abl_loss

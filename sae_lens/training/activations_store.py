@@ -504,6 +504,10 @@ class ActivationsStore:
         num_layers = 1
         total_tokens = batch_size * n_batches_in_buffer * context_size
 
+        # Calculate sizes for control and main buffers based on the control mixture
+        control_size = int(total_tokens * self.control_mixture)
+        main_size = total_tokens - control_size
+
         if self.cached_activations_path is not None:
             buffer_size = total_tokens
             new_buffer = torch.zeros(
@@ -513,22 +517,28 @@ class ActivationsStore:
             )
             n_tokens_filled = 0
             
+            # Load cached activations until buffer is full
             while n_tokens_filled < buffer_size:
+                # Check if the cache file exists
                 if not os.path.exists(f"{self.cached_activations_path}/{self.next_cache_idx}.safetensors"):
                     print("\n\nWarning: Ran out of cached activation files earlier than expected.")
                     print(f"Expected to have {buffer_size} activations, but only found {n_tokens_filled}.")
                     if buffer_size % self.total_training_tokens != 0:
                         print("This might just be a rounding error — your batch_size * n_batches_in_buffer * context_size is not divisible by your total_training_tokens")
                     print(f"Returning a buffer of size {n_tokens_filled} instead.")
+                    # Return the partially filled buffer and an empty control buffer
                     new_buffer = new_buffer[:n_tokens_filled, ...]
                     return new_buffer, torch.zeros(0, num_layers, d_in, dtype=self.dtype, device=self.device)
 
+                # Load the activations from the cache
                 activations = self.load_buffer(f"{self.cached_activations_path}/{self.next_cache_idx}.safetensors")
                 taking_subset_of_file = False
                 if n_tokens_filled + activations.shape[0] > buffer_size:
+                    # Take a subset if the activations exceed the buffer size
                     activations = activations[: buffer_size - n_tokens_filled, ...]
                     taking_subset_of_file = True
 
+                # Fill the buffer with the loaded activations
                 new_buffer[n_tokens_filled : n_tokens_filled + activations.shape[0], ...] = activations
 
                 if taking_subset_of_file:
@@ -538,16 +548,18 @@ class ActivationsStore:
                     self.next_idx_within_buffer = 0
 
                 n_tokens_filled += activations.shape[0]
+            
+            # Return the filled buffer and an empty control buffer
             return new_buffer, torch.zeros(0, num_layers, d_in, dtype=self.dtype, device=self.device)
 
-        refill_iterator = range(0, total_tokens, batch_size * context_size)
+        # Initialize buffers for control and main activations with appropriate sizes
         new_control_buffer = torch.zeros(
-            (total_tokens, num_layers, d_in),
+            (control_size, num_layers, d_in),
             dtype=self.dtype,  # type: ignore
             device=self.device,
         )
         new_main_buffer = torch.zeros(
-            (total_tokens, num_layers, d_in),
+            (main_size, num_layers, d_in),
             dtype=self.dtype,  # type: ignore
             device=self.device,
         )
@@ -555,8 +567,13 @@ class ActivationsStore:
         control_activations_list = []
         main_activations_list = []
 
+        # Define the refill iterator for generating batches of tokens
+        refill_iterator = range(0, total_tokens, batch_size * context_size)
+
+        # Refill the buffers by generating activations
         for refill_batch_idx_start in refill_iterator:
             if self.control_dataset:
+                # Determine batch sizes for main and control datasets
                 main_batch_size = int(batch_size * (1 - self.control_mixture))
                 control_batch_size = batch_size - main_batch_size
 
@@ -565,18 +582,16 @@ class ActivationsStore:
                     refill_main_batch_tokens = self.get_batch_tokens(main_batch_size).to(self.model.cfg.device)
                     refill_control_batch_tokens = self.get_control_batch_tokens(control_batch_size).to(self.model.cfg.device)
                 except StopIteration:
-                    print("Warning: Dataset exhausted during refill. Exiting refill loop.")
                     break
 
                 if refill_main_batch_tokens.shape[0] == 0 or refill_control_batch_tokens.shape[0] == 0:
-                    print("Warning: Empty batch tokens encountered. Exiting refill loop.")
                     break
 
                 # Combine the tokens from both datasets into a single batch
                 combined_batch_tokens = torch.cat((refill_control_batch_tokens, refill_main_batch_tokens), dim=0)
 
                 # Get the activations for the combined tokens in a single forward pass
-                combined_activations = self.get_activations(combined_batch_tokens) # [batch seq layer d_in]
+                combined_activations = self.get_activations(combined_batch_tokens)  # [batch seq layer d_in]
 
                 # Split the combined activations back into control and main activations
                 control_activations = rearrange(combined_activations[:control_batch_size],
@@ -593,11 +608,9 @@ class ActivationsStore:
                     # Get tokens from the main dataset
                     refill_batch_tokens = self.get_batch_tokens(batch_size).to(self.model.cfg.device)
                 except StopIteration:
-                    print("Warning: Dataset exhausted during refill. Exiting refill loop.")
                     break
 
                 if refill_batch_tokens.shape[0] == 0:
-                    print("Warning: Empty batch tokens encountered. Exiting refill loop.")
                     break
 
                 # Get the activations for the tokens
@@ -606,16 +619,21 @@ class ActivationsStore:
 
         # Concatenate the control and main activations
         if self.control_dataset and len(control_activations_list) > 0:
-            control_activations = torch.cat(control_activations_list, dim=0)
-            control_activations = control_activations[torch.randperm(control_activations.shape[0])]
-            new_control_buffer[:control_activations.shape[0]] = control_activations
+            new_control_buffer = torch.cat(control_activations_list, dim=0)
+            new_control_buffer = new_control_buffer[torch.randperm(new_control_buffer.shape[0])]
+
 
         if len(main_activations_list) > 0:
-            main_activations = torch.cat(main_activations_list, dim=0)
-            main_activations = main_activations[torch.randperm(main_activations.shape[0])]
-            new_main_buffer[:main_activations.shape[0]] = main_activations
+            new_main_buffer = torch.cat(main_activations_list, dim=0)
+            new_main_buffer = new_main_buffer[torch.randperm(new_main_buffer.shape[0])]
+            
 
+        # Return the control and main buffers
         return new_control_buffer, new_main_buffer
+
+
+
+
 
 
     def get_data_loader(self) -> Iterator[Any]:

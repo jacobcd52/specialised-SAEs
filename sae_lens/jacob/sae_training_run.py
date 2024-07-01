@@ -29,8 +29,8 @@ expansion_factor = 4
 
 
 for lr in [1e-4, 1e-5]:
-    for l1_coefficient in [30, 40]:
-        for control_mixture in [0.1, 0.0, 0.5]:
+    for l1_coefficient in [10, 5, 15]:
+        for control_mixture in [0.1, 0.5]:
             cfg = LanguageModelSAERunnerConfig(
                 # JACOB
                 gsae_repo = "jacobcd52/mats-saes",
@@ -82,7 +82,7 @@ for lr in [1e-4, 1e-5]:
                 dead_feature_threshold=1e-4,  # would effect resampling or ghost grads if we were using it.
                 # WANDB
                 log_to_wandb=True,  # always use wandb unless you are just testing code.
-                wandb_project="physics-SSAE-gpt2",
+                wandb_project="phys-SSAE-gpt2",
                 wandb_log_frequency=30,
                 eval_every_n_wandb_logs=20,
                 # Misc
