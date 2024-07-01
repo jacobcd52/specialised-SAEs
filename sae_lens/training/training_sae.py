@@ -353,7 +353,7 @@ class TrainingSAE(SAE):
         # JACOB
         if self.gsae:
             # TODO split by data type
-            assert len(sae_in.shape) == 2 # expect [batch d_model] -- but could be inst?
+            assert len(sae_in.shape) == 2 # expect [batch d_model]
             control_batch_size = int(sae_in.size(0) * self.cfg.control_mixture)
             target = sae_in - self.gsae(sae_in) 
             target[:control_batch_size] = 0 # for the control dataset, we want the SSAE to output 0

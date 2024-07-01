@@ -30,7 +30,7 @@ expansion_factor = 4
 
 for lr in [1e-4, 1e-5]:
     for l1_coefficient in [30, 40]:
-        for control_mixture in [0, 0.1, 0.5]:
+        for control_mixture in [0.1, 0.0, 0.5]:
             cfg = LanguageModelSAERunnerConfig(
                 # JACOB
                 gsae_repo = "jacobcd52/mats-saes",
