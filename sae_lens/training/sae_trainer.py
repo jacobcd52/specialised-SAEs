@@ -155,6 +155,9 @@ class SAETrainer:
 
         # Train loop
         while self.n_training_tokens < self.cfg.total_training_tokens:
+            print()
+            print("start step")
+            print("used tokens = ", self.n_training_tokens)
             # Do a training step.
             layer_acts = self.activation_store.next_batch()[:, 0, :].to(self.sae.device)
             self.n_training_tokens += self.cfg.train_batch_size_tokens
@@ -171,6 +174,10 @@ class SAETrainer:
 
             ### If n_training_tokens > sae_group.cfg.training_tokens, then we should switch to fine-tuning (if we haven't already)
             self._begin_finetuning_if_needed()
+
+            print("end step")
+            print()
+
 
         # save final sae group to checkpoints folder
         self.save_checkpoint(

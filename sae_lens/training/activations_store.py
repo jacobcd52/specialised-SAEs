@@ -497,7 +497,7 @@ class ActivationsStore:
         return stacked_activations
 
     @torch.no_grad()
-    def get_buffer(self, n_batches_in_buffer: int) -> torch.Tensor:
+    def get_buffer(self, n_batches_in_buffer: int) -> tuple[torch.Tensor, torch.Tensor]:
         context_size = self.context_size
         batch_size = self.store_batch_size_prompts
         d_in = self.d_in
@@ -512,43 +512,48 @@ class ActivationsStore:
                 device=self.device,
             )
             n_tokens_filled = 0
-
+            
             while n_tokens_filled < buffer_size:
                 if not os.path.exists(f"{self.cached_activations_path}/{self.next_cache_idx}.safetensors"):
                     print("\n\nWarning: Ran out of cached activation files earlier than expected.")
                     print(f"Expected to have {buffer_size} activations, but only found {n_tokens_filled}.")
                     if buffer_size % self.total_training_tokens != 0:
                         print("This might just be a rounding error — your batch_size * n_batches_in_buffer * context_size is not divisible by your total_training_tokens")
-                        print(f"Returning a buffer of size {n_tokens_filled} instead.")
-                        new_buffer = new_buffer[:n_tokens_filled, ...]
-                        return new_buffer
+                    print(f"Returning a buffer of size {n_tokens_filled} instead.")
+                    new_buffer = new_buffer[:n_tokens_filled, ...]
+                    return new_buffer, torch.zeros(0, num_layers, d_in, dtype=self.dtype, device=self.device)
 
-                    activations = self.load_buffer(f"{self.cached_activations_path}/{self.next_cache_idx}.safetensors")
-                    taking_subset_of_file = False
-                    if n_tokens_filled + activations.shape[0] > buffer_size:
-                        activations = activations[: buffer_size - n_tokens_filled, ...]
-                        taking_subset_of_file = True
+                activations = self.load_buffer(f"{self.cached_activations_path}/{self.next_cache_idx}.safetensors")
+                taking_subset_of_file = False
+                if n_tokens_filled + activations.shape[0] > buffer_size:
+                    activations = activations[: buffer_size - n_tokens_filled, ...]
+                    taking_subset_of_file = True
 
-                    new_buffer[n_tokens_filled : n_tokens_filled + activations.shape[0], ...] = activations
+                new_buffer[n_tokens_filled : n_tokens_filled + activations.shape[0], ...] = activations
 
-                    if taking_subset_of_file:
-                        self.next_idx_within_buffer = activations.shape[0]
-                    else:
-                        self.next_cache_idx += 1
-                        self.next_idx_within_buffer = 0
+                if taking_subset_of_file:
+                    self.next_idx_within_buffer = activations.shape[0]
+                else:
+                    self.next_cache_idx += 1
+                    self.next_idx_within_buffer = 0
 
-                    n_tokens_filled += activations.shape[0]
-
-            return new_buffer
+                n_tokens_filled += activations.shape[0]
+            return new_buffer, torch.zeros(0, num_layers, d_in, dtype=self.dtype, device=self.device)
 
         refill_iterator = range(0, total_tokens, batch_size * context_size)
-        new_buffer = torch.zeros(
+        new_control_buffer = torch.zeros(
+            (total_tokens, num_layers, d_in),
+            dtype=self.dtype,  # type: ignore
+            device=self.device,
+        )
+        new_main_buffer = torch.zeros(
             (total_tokens, num_layers, d_in),
             dtype=self.dtype,  # type: ignore
             device=self.device,
         )
 
-        all_activations_list = []
+        control_activations_list = []
+        main_activations_list = []
 
         for refill_batch_idx_start in refill_iterator:
             if self.control_dataset:
@@ -580,7 +585,8 @@ class ActivationsStore:
                                             "batch seq layer d_in -> (batch seq) layer d_in")
                 
                 # Append the activations to their respective lists
-                all_activations_list.append((control_activations, main_activations))
+                control_activations_list.append(control_activations)
+                main_activations_list.append(main_activations)
 
             else:
                 try:
@@ -596,49 +602,90 @@ class ActivationsStore:
 
                 # Get the activations for the tokens
                 refill_batch_activations = self.get_activations(refill_batch_tokens).view(-1, num_layers, d_in)
-                all_activations_list.append((None, refill_batch_activations))
+                main_activations_list.append(refill_batch_activations)
 
-        # Separate the control and main activations
-        control_activations_list = [act[0] for act in all_activations_list if act[0] is not None]
-        main_activations_list = [act[1] for act in all_activations_list]
+        # Concatenate the control and main activations
+        if self.control_dataset and len(control_activations_list) > 0:
+            control_activations = torch.cat(control_activations_list, dim=0)
+            control_activations = control_activations[torch.randperm(control_activations.shape[0])]
+            new_control_buffer[:control_activations.shape[0]] = control_activations
 
-        if self.control_dataset:
-            # Check if there are any control activations collected
-            if len(control_activations_list) > 0:
-                # Concatenate all control activations
-                control_activations = torch.cat(control_activations_list, dim=0)
-                # Shuffle the control activations
-                control_activations = control_activations[torch.randperm(control_activations.shape[0])]
-                # Fill the new buffer with the shuffled control activations
-                new_buffer[:control_activations.shape[0]] = control_activations
+        if len(main_activations_list) > 0:
+            main_activations = torch.cat(main_activations_list, dim=0)
+            main_activations = main_activations[torch.randperm(main_activations.shape[0])]
+            new_main_buffer[:main_activations.shape[0]] = main_activations
 
-            # Check if there are any main activations collected
-            if len(main_activations_list) > 0:
-                # Concatenate all main activations
-                main_activations = torch.cat(main_activations_list, dim=0)
-                # Shuffle the main activations
-                main_activations = main_activations[torch.randperm(main_activations.shape[0])]
-                
-                # Check if the combined size of control and main activations fits in the new buffer
-                if control_activations.shape[0] + main_activations.shape[0] <= new_buffer.shape[0]:
-                    # If yes, fill the buffer after control activations with the main activations
-                    new_buffer[control_activations.shape[0]:control_activations.shape[0] + main_activations.shape[0]] = main_activations
-                else:
-                    # If no, adjust main activations to fit the remaining buffer space
-                    print(f"Warning: Main activations exceed buffer size. Adjusting to fit.")
-                    main_activations = main_activations[:new_buffer.shape[0] - control_activations.shape[0]]
-                    new_buffer[control_activations.shape[0]:control_activations.shape[0] + main_activations.shape[0]] = main_activations
-        else:
-            # If there's no control dataset, handle only the main activations
-            if len(main_activations_list) > 0:
-                # Concatenate all main activations
-                main_activations = torch.cat(main_activations_list, dim=0)
-                # Shuffle the main activations
-                main_activations = main_activations[torch.randperm(main_activations.shape[0])]
-                # Set the new buffer with the shuffled main activations
-                new_buffer = main_activations
+        return new_control_buffer, new_main_buffer
 
-        return new_buffer
+
+    def get_data_loader(self) -> Iterator[Any]:
+        """
+        Return a torch.utils.dataloader which you can get batches from.
+
+        Should automatically refill the buffer when it gets to n % full.
+        (better mixing if you refill and shuffle regularly).
+        """
+
+        batch_size = self.train_batch_size_tokens
+
+        # Get the new control and main buffers
+        new_control_buffer, new_main_buffer = self.get_buffer(self.n_batches_in_buffer // 2)
+
+        control_size = int(self.control_mixture * batch_size)
+        main_size = batch_size - control_size
+
+        def mix_activations():
+            """
+            Generator to yield mixed activations batches.
+            Each batch will have `control_size` elements from the control dataset
+            and `main_size` elements from the main dataset.
+            """
+            control_idx = 0
+            main_idx = 0
+
+            batch_count = 0
+            while control_idx < new_control_buffer.shape[0] and main_idx < new_main_buffer.shape[0]:
+                control_batch = new_control_buffer[control_idx:control_idx + control_size]
+                main_batch = new_main_buffer[main_idx:main_idx + main_size]
+                if control_batch.shape[0] < control_size or main_batch.shape[0] < main_size:
+                    break  # Exit if we have incomplete batches
+
+                control_indices = torch.randperm(control_batch.shape[0])
+                main_indices = torch.randperm(main_batch.shape[0])
+
+                mixed_batch = torch.cat((control_batch[control_indices], main_batch[main_indices]), dim=0)
+                control_idx += control_size
+                main_idx += main_size
+
+                batch_count += 1
+                yield mixed_batch
+
+        # Create the mixing buffer by combining the control and main buffers
+        mixing_buffer = torch.cat([new_control_buffer, new_main_buffer], dim=0)
+
+        # 2. Put 50% in storage
+        self._storage_buffer = mixing_buffer[: mixing_buffer.shape[0] // 2]
+
+        # 3. Use the other 50% to create a dataloader
+        mixed_activations = list(mix_activations())
+
+        if len(mixed_activations) == 0:
+            print("Warning: No mixed activations were generated.")
+            return None
+
+
+        # Wrap the mixed activations in a TensorDataset
+        dataset = TensorDataset(torch.stack(mixed_activations))
+
+        # Create DataLoader with batch_size=1 to yield individual mixed batches
+        dataloader = DataLoader(
+            dataset,
+            batch_size=1,
+            shuffle=False,
+            collate_fn=lambda x: x[0]  # Extract the tensor from the tuple
+        )
+ 
+        return iter(dataloader)
 
 
     def save_buffer(self, buffer: torch.Tensor, path: str):
@@ -654,58 +701,6 @@ class ActivationsStore:
             buffer = f.get_tensor("activations")
         return buffer
 
-    def get_data_loader(self) -> Iterator[Any]:
-        """
-        Return a torch.utils.dataloader which you can get batches from.
-
-        Should automatically refill the buffer when it gets to n % full.
-        (better mixing if you refill and shuffle regularly).
-        """
-
-        batch_size = self.train_batch_size_tokens
-
-        # 1. Create a new buffer by mixing the stored buffer and a new buffer
-        mixing_buffer = torch.cat(
-            [self.get_buffer(self.n_batches_in_buffer // 2), self.storage_buffer],
-            dim=0,
-        )
-
-        control_size = int(self.control_mixture * batch_size)
-        main_size = batch_size - control_size
-
-        def mix_activations():
-            """
-            Generator to yield mixed activations batches.
-            Each batch will have `control_size` elements from the control dataset
-            and `main_size` elements from the main dataset.
-            """
-            for i in range(0, mixing_buffer.shape[0], batch_size):
-                batch = mixing_buffer[i:i+batch_size]
-                if batch.shape[0] < batch_size:
-                    continue  # Skip incomplete batches
-                control_activations = batch[:control_size]
-                main_activations = batch[control_size:]
-                control_indices = torch.randperm(control_activations.shape[0])
-                main_indices = torch.randperm(main_activations.shape[0])
-                mixed_batch = torch.cat((control_activations[control_indices], main_activations[main_indices]), dim=0)
-                yield mixed_batch
-
-        # 2. Put 50% in storage
-        self._storage_buffer = mixing_buffer[: mixing_buffer.shape[0] // 2]
-
-        # 3. Use the other 50% to create a dataloader
-        mixed_activations = list(mix_activations())
-        dataloader = iter(
-            DataLoader(
-                TensorDataset(torch.stack(mixed_activations)),
-                batch_size=batch_size,
-                shuffle=False,
-                collate_fn=lambda x: x[0],  # Extract the tensor from the tuple
-            )
-        )
-
-        return dataloader
-
     def next_batch(self):
         """
         Get the next batch from the current DataLoader.
@@ -713,7 +708,8 @@ class ActivationsStore:
         """
         try:
             # Try to get the next batch
-            return next(self.dataloader)[0]
+            batch =  next(self.dataloader)[0]
+            return batch
         except StopIteration:
             # If the DataLoader is exhausted, create a new one
             self._dataloader = self.get_data_loader()
@@ -741,7 +737,6 @@ class ActivationsStore:
                 except StopIteration:
                     # Handle the case where there are no more elements in the iterator
                     s = ""
-                    print("no more elements in the iterator")
                     break
 
             # if s is None:
