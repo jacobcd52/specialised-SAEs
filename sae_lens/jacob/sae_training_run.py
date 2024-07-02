@@ -2,10 +2,7 @@ import sys
 sys.path.append("/root/specialised-SAEs/")
 import os
 from sae_lens.config import LanguageModelSAERunnerConfig
-from sae_lens.training.training_sae import TrainingSAEConfig, TrainingSAE
-from sae_lens.sae import SAE
 from sae_lens.sae_training_runner import SAETrainingRunner
-from sae_lens.training.activations_store import ActivationsStore
 import logging
 logger = logging.getLogger()
 logger.setLevel(logging.ERROR)
@@ -17,7 +14,7 @@ api = HfApi()
 
 
 
-total_training_steps = 5_000 
+total_training_steps = 4_000 
 batch_size = 4096*2
 total_training_tokens = total_training_steps * batch_size
 
@@ -25,25 +22,25 @@ lr_warm_up_steps = 0
 lr_decay_steps = total_training_steps // 5  # 20% of training
 l1_warm_up_steps = total_training_steps // 20  # 5% of training
 
-expansion_factor = 4
+expansion_factor = 2
 
-
-for lr in [1e-4, 1e-5]:
-    for l1_coefficient in [10, 5, 15]:
-        for control_mixture in [0.1, 0.5]:
+for control_mixture in [0.1]:
+    for l1_coefficient in [4.0]:
+        for lr in [1e-3]:
             cfg = LanguageModelSAERunnerConfig(
                 # JACOB
+                d_sae = 768//2,
                 gsae_repo = "jacobcd52/mats-saes",
                 gsae_filename_no_suffix= "gpt2_resid_8_gated_gsae",
-                control_dataset_path="NeelNanda/openwebtext-tokenized-9b",
                 is_control_dataset_tokenized=True,
                 control_mixture=control_mixture,
+                control_dataset_path="NeelNanda/openwebtext-tokenized-9b" if control_mixture > 0 else None,
 
                 dataset_path="jacobcd52/physics-papers",
                 is_dataset_tokenized=False,
 
                 # Data Generating Function (Model + Training Distribution)
-                architecture="gated",  # we'll use the gated variant.
+                architecture="standard",  # we'll use the gated variant.
                 model_name="gpt2-small",  # our model (more options here: https://neelnanda-io.github.io/TransformerLens/generated/model_properties_table.html)
                 hook_name="blocks.8.hook_resid_pre",  # A valid hook point (see more details here: https://neelnanda-io.github.io/TransformerLens/generated/demos/Main_Demo.html#Hook-Points)
                 hook_layer=8,  # Only one layer in the model.
@@ -60,7 +57,7 @@ for lr in [1e-4, 1e-5]:
                 init_encoder_as_decoder_transpose=True,
                 # normalize_activations=False, JACOB
                 # Training Parameters
-                lr=5e-5,  # lower the better, we'll go fairly high to speed up the tutorial.
+                lr=lr,  # lower the better, we'll go fairly high to speed up the tutorial.
                 adam_beta1=0.9,  # adam params (default, but once upon a time we experimented with these.)
                 adam_beta2=0.999,
                 lr_scheduler_name="constant",  # constant learning rate with warmup. Could be better schedules out there.
@@ -83,6 +80,7 @@ for lr in [1e-4, 1e-5]:
                 # WANDB
                 log_to_wandb=True,  # always use wandb unless you are just testing code.
                 wandb_project="phys-SSAE-gpt2",
+                run_name = f"l1={l1_coefficient}_expansion={expansion_factor}_control_mix={control_mixture}_tokens={batch_size*total_training_steps}_lr={lr}",
                 wandb_log_frequency=30,
                 eval_every_n_wandb_logs=20,
                 # Misc
