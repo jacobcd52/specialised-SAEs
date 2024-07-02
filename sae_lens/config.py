@@ -141,7 +141,7 @@ class LanguageModelSAERunnerConfig:
     d_in: int = 512
     d_sae: Optional[int] = None
     b_dec_init_method: str = "geometric_median"
-    expansion_factor: int = 4
+    expansion_factor: float | int = 4
     activation_fn: str = "relu"  # relu, tanh-relu
     normalize_sae_decoder: bool = True
     noise_scale: float = 0.0
@@ -253,8 +253,8 @@ class LanguageModelSAERunnerConfig:
                 self.hook_head_index,
             )
 
-        if not isinstance(self.expansion_factor, list):
-            self.d_sae = self.d_in * self.expansion_factor
+        if not isinstance(self.expansion_factor, list) and not self.d_sae:
+            self.d_sae = int(self.d_in * self.expansion_factor)
         self.tokens_per_buffer = (
             self.train_batch_size_tokens * self.context_size * self.n_batches_in_buffer
         )

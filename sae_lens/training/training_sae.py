@@ -31,9 +31,13 @@ class TrainStepOutput:
     loss: torch.Tensor  # we need to call backwards on this
     main_mse_loss: float
     control_mse_loss: float
+    target_output_norm : float
+    main_output_norm : float
+    control_output_norm : float
     l1_loss: float
     ghost_grad_loss: float
     auxiliary_reconstruction_loss: float = 0.0
+
 
 
 @dataclass
@@ -238,9 +242,12 @@ class TrainingSAE(SAE):
             # Load weights into GSAE
             print(f"Loading weights into GSAE from {temp_weights_path}")                
             self.gsae = SAE.load_from_pretrained(temp_gsae_path, device=self.cfg.device)
+            for param in self.gsae.parameters():
+                param.requires_grad = False
             assert(self.gsae.use_error_term == False)
             assert self.gsae, "GSAE not loaded"
-                
+            assert self.gsae.cfg.hook_name == self.cfg.hook_name, f"hook_name mismatch: {self.gsae.cfg.hook_name} vs {self.cfg.hook_name}"
+            assert self.gsae.cfg.model_name == self.cfg.model_name, f"model_name mismatch: {self.gsae.cfg.model_name} vs {self.cfg.model_name}"
             print("finished loading gsae")
 
         if not self.cfg.gsae_repo and self.cfg.control_dataset_path:
@@ -363,14 +370,21 @@ class TrainingSAE(SAE):
             control_mse_loss = per_item_mse_loss[:control_batch_size].sum(dim=-1).mean()
             main_mse_loss = per_item_mse_loss[control_batch_size:].sum(dim=-1).mean()
 
+            # calculate norms for logging
+            target_output_norm = torch.norm(target[control_batch_size:], dim=-1).mean()
+            main_output_norm = torch.norm(sae_out[control_batch_size:], dim=-1).mean()
+            control_output_norm = torch.norm(sae_out[:control_batch_size], dim=-1).mean()
+
         else:
             target = sae_in
             per_item_mse_loss = self.mse_loss_fn(sae_out, target)
             mse_loss = per_item_mse_loss.sum(dim=-1).mean()
             control_mse_loss = torch.tensor(0.0)
             main_mse_loss = mse_loss
+            target_output_norm = target.norm(dim=-1).mean()
+            main_output_norm = torch.norm(sae_out, dim=-1).mean()
+            control_output_norm = torch.tensor(0.0)
 
-        # 
 
         # GHOST GRADS
         if self.cfg.use_ghost_grads and self.training and dead_neuron_mask is not None:
@@ -426,6 +440,9 @@ class TrainingSAE(SAE):
             sae_in=sae_in,
             sae_out=sae_out,
             feature_acts=feature_acts,
+            target_output_norm=target_output_norm.item(),
+            main_output_norm=main_output_norm.item(),
+            control_output_norm=control_output_norm.item(),
             loss=loss,
             control_mse_loss=control_mse_loss.item(),
             main_mse_loss=main_mse_loss.item(),

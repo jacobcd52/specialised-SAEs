@@ -270,6 +270,10 @@ class SAETrainer:
         feature_acts = output.feature_acts
         control_mse_loss = output.control_mse_loss
         main_mse_loss = output.main_mse_loss
+        target_output_norm = output.target_output_norm
+        main_output_norm = output.main_output_norm
+        control_output_norm = output.control_output_norm
+
         l1_loss = output.l1_loss
         ghost_grad_loss = output.ghost_grad_loss
         loss = output.loss.item()
@@ -294,8 +298,12 @@ class SAETrainer:
             "losses/ghost_grad_loss": ghost_grad_loss,
             "losses/overall_loss": loss,
             # variance explained
-            "metrics/explained_variance": explained_variance.mean().item(),
-            "metrics/explained_variance_std": explained_variance.std().item(),
+            # "metrics/explained_variance": explained_variance.mean().item(),
+            # "metrics/explained_variance_std": explained_variance.std().item(),
+            "metrics/target_output_norm" : target_output_norm,
+            "metrics/main_output_norm" : main_output_norm,
+            "metrics/control_output_norm" : control_output_norm,
+
             "metrics/l0": l0.item(),
             # sparsity
             "sparsity/mean_passes_since_fired": self.n_forward_passes_since_fired.mean().item(),
