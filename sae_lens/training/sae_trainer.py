@@ -316,7 +316,7 @@ class SAETrainer:
     @torch.no_grad()
     def _run_and_log_evals(self):
         # record loss frequently, but not all the time.
-        if (self.n_training_steps + 1) % (
+        if (self.n_training_steps) % (
             self.cfg.wandb_log_frequency * self.cfg.eval_every_n_wandb_logs
         ) == 0:
             self.sae.eval()
