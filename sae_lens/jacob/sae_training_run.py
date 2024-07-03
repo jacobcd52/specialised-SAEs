@@ -77,7 +77,7 @@ for l1_coefficient in [2.0, 3.0, 4.0, 5.0, 6.0]:
             dead_feature_threshold=1e-4,  # would effect resampling or ghost grads if we were using it.
             # WANDB
             log_to_wandb=True,  # always use wandb unless you are just testing code.
-            wandb_project="phys-SSAE-gpt2",
+            wandb_project="scratch-ssae-stuff",
             run_name = f"l1={l1_coefficient}_expansion={expansion_factor}_control_mix={control_mixture}_tokens={batch_size*total_training_steps}_lr={lr}",
             wandb_log_frequency=30,
             eval_every_n_wandb_logs=20,

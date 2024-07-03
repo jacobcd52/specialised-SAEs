@@ -1,0 +1,3 @@
+[submodule "sae_vis"]
+	path = sae_vis
+	url = https://github.com/callummcdougall/sae_vis.git
