@@ -321,19 +321,23 @@ class SAE(HookedRootModule):
         return self.hook_sae_output(sae_out)
 
     def encode_gated(
-        self, x: Float[torch.Tensor, "... d_in"]
+        self, x: Float[torch.Tensor, "... d_in"],
+        feature_idx: Optional[list[int]] = None,
     ) -> Float[torch.Tensor, "... d_sae"]:
+        if feature_idx is None:
+            feature_idx = list(range(self.cfg.d_sae))
+
         x = x.to(self.dtype)
         x = self.reshape_fn_in(x)
         sae_in = self.hook_sae_input(x - self.b_dec * self.cfg.apply_b_dec_to_input)
 
         # Gating path
-        gating_pre_activation = sae_in @ self.W_enc + self.b_gate
+        gating_pre_activation = sae_in @ self.W_enc[:, feature_idx] + self.b_gate[feature_idx]
         active_features = (gating_pre_activation > 0).float()
 
         # Magnitude path with weight sharing
         magnitude_pre_activation = self.hook_sae_acts_pre(
-            sae_in @ (self.W_enc * self.r_mag.exp()) + self.b_mag
+            sae_in @ (self.W_enc[:, feature_idx] * self.r_mag[feature_idx].exp()) + self.b_mag[feature_idx]
         )
         feature_magnitudes = self.hook_sae_acts_post(
             self.activation_fn(magnitude_pre_activation)
@@ -342,12 +346,15 @@ class SAE(HookedRootModule):
         return active_features * feature_magnitudes
 
     def encode(
-        self, x: Float[torch.Tensor, "... d_in"]
+        self, x: Float[torch.Tensor, "... d_in"],
+        feature_idx: Optional[list[int]] = None,
     ) -> Float[torch.Tensor, "... d_sae"]:
         """
         Calculate SAE features from inputs
         """
-
+        # option to only run encode certain features. Useful for generating dashboards.
+        if feature_idx is None:
+            feature_idx = list(range(self.cfg.d_sae))
         # move x to correct dtype
         x = x.to(self.dtype)
 
@@ -361,7 +368,7 @@ class SAE(HookedRootModule):
         sae_in = self.hook_sae_input(x - (self.b_dec * self.cfg.apply_b_dec_to_input))
 
         # "... d_in, d_in d_sae -> ... d_sae",
-        hidden_pre = self.hook_sae_acts_pre(sae_in @ self.W_enc + self.b_enc)
+        hidden_pre = self.hook_sae_acts_pre(sae_in @ self.W_enc[:, feature_idx] + self.b_enc[feature_idx])
         feature_acts = self.hook_sae_acts_post(self.activation_fn(hidden_pre))
 
         return feature_acts
@@ -437,7 +444,8 @@ class SAE(HookedRootModule):
         sae_cfg = SAEConfig.from_dict(cfg_dict)
 
         sae = cls(sae_cfg)
-        sae.load_state_dict(state_dict)
+
+        sae.load_state_dict(state_dict, strict=False)
 
         return sae
 

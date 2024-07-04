@@ -38,7 +38,7 @@ for l1_coefficient in [2.0, 3.0, 4.0, 5.0, 6.0]:
             is_dataset_tokenized=False,
 
             # Data Generating Function (Model + Training Distribution)
-            architecture="standard",  # we'll use the gated variant.
+            architecture="gated",  # we'll use the gated variant.
             model_name="gpt2-small",  # our model (more options here: https://neelnanda-io.github.io/TransformerLens/generated/model_properties_table.html)
             hook_name="blocks.8.hook_resid_pre",  # A valid hook point (see more details here: https://neelnanda-io.github.io/TransformerLens/generated/demos/Main_Demo.html#Hook-Points)
             hook_layer=8,  # Only one layer in the model.
