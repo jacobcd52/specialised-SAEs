@@ -1,5 +1,5 @@
-transformer-lens==1.10.0 #2.2.0
-transformers==4.35.2
+transformer-lens==2.2.0
+transformers==4.42.3
 jupyter==1.0.0
 plotly==5.18.0
 plotly-express==0.4.1

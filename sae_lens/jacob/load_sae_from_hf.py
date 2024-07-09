@@ -1,8 +1,9 @@
 import os
 from huggingface_hub import hf_hub_download
 from sae_lens.sae import SAE
-
-def load_sae_from_hf(repo_id, filename, cfg_filename, device):
+import torch 
+from sae_lens.config import DTYPE_MAP
+def load_sae_from_hf(repo_id, filename, cfg_filename, device="cuda", dtype="float32"):
     # Make a directory to store the weights and cfg
     temp_gsae_path = "temp_sae"
     os.makedirs(temp_gsae_path, exist_ok=True)
@@ -36,5 +37,5 @@ def load_sae_from_hf(repo_id, filename, cfg_filename, device):
 
     # Load weights into GSAE
     print(f"Loading weights into GSAE from {temp_weights_path}")                
-    sae = SAE.load_from_pretrained(temp_gsae_path, device=device)
+    sae = SAE.load_from_pretrained(temp_gsae_path, device=device, dtype=dtype)
     return sae

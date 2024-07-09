@@ -9,7 +9,7 @@ from .config import (
     PretokenizeRunnerConfig,
 )
 from .evals import run_evals
-from .pretokenize_runner import PretokenizeRunner, pretokenize_runner
+from .pretokenize_runner import PretokenizeRunner #, pretokenize_runner
 from .sae import SAE, SAEConfig
 from .sae_training_runner import SAETrainingRunner
 from .training.activations_store import ActivationsStore

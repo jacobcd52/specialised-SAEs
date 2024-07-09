@@ -17,7 +17,8 @@ from huggingface_hub import hf_hub_download
 
 
 
-from sae_lens.config import LanguageModelSAERunnerConfig
+
+from sae_lens.config import LanguageModelSAERunnerConfig, DTYPE_MAP
 from sae_lens.sae import SAE, SAEConfig
 from sae_lens.toolkit.pretrained_sae_loaders import (
     load_pretrained_sae_lens_sae_components,
@@ -51,6 +52,7 @@ class TrainingSAEConfig(SAEConfig):
     control_dataset_path : Optional[str]
     control_mixture : float
     is_control_dataset_tokenized : bool
+    save_final_checkpoint_locally : bool
 
     # Sparsity Loss Calculations
     l1_coefficient: float
@@ -77,6 +79,7 @@ class TrainingSAEConfig(SAEConfig):
             control_dataset_path = cfg.control_dataset_path,
             control_mixture=cfg.control_mixture,
             is_control_dataset_tokenized = cfg.is_control_dataset_tokenized,
+            save_final_checkpoint_locally = cfg.save_final_checkpoint_locally,
 
             # base config
             architecture=cfg.architecture,
@@ -160,7 +163,8 @@ class TrainingSAEConfig(SAEConfig):
             "gsae_cfg_filename" : self.gsae_cfg_filename,
             "control_dataset_path" : self.control_dataset_path,
             "control_mixture" : self.control_mixture,
-            "is_control_dataset_tokenized" : self.is_control_dataset_tokenized
+            "is_control_dataset_tokenized" : self.is_control_dataset_tokenized,
+            "save_final_checkpoint_locally" : self.save_final_checkpoint_locally
         }
 
 
@@ -210,7 +214,11 @@ class TrainingSAE(SAE):
         self.gsae = None
 
         if self.cfg.gsae_repo:
-            self.gsae = load_sae_from_hf(self.cfg.gsae_repo, self.cfg.gsae_filename, self.cfg.gsae_cfg_filename, self.cfg.device)
+            self.gsae = load_sae_from_hf(self.cfg.gsae_repo, 
+                                         self.cfg.gsae_filename, 
+                                         self.cfg.gsae_cfg_filename, 
+                                         device=self.cfg.device,
+                                         dtype=self.cfg.dtype)
             if self.gsae:
                 for param in self.gsae.parameters():
                     param.requires_grad = False
@@ -257,41 +265,34 @@ class TrainingSAE(SAE):
 
         # move x to correct dtype
         x = x.to(self.dtype)
-
         # handle hook z reshaping if needed.
         x = self.reshape_fn_in(x)  # type: ignore
-
         # apply b_dec_to_input if using that method.
         sae_in = self.hook_sae_input(x - (self.b_dec * self.cfg.apply_b_dec_to_input))
-
         # handle run time activation normalization if needed
         x = self.run_time_activation_norm_fn_in(x)
-
         # "... d_in, d_in d_sae -> ... d_sae",
         hidden_pre = self.hook_sae_acts_pre(sae_in @ self.W_enc + self.b_enc)
         hidden_pre_noised = hidden_pre + (
             torch.randn_like(hidden_pre) * self.cfg.noise_scale * self.training
         )
         feature_acts = self.hook_sae_acts_post(self.activation_fn(hidden_pre_noised))
-
         return feature_acts, hidden_pre_noised
 
     def encode_with_hidden_pre_gated(
         self, x: Float[torch.Tensor, "... d_in"]
     ) -> tuple[Float[torch.Tensor, "... d_sae"], Float[torch.Tensor, "... d_sae"]]:
-
         # move x to correct dtype
         x = x.to(self.dtype)
 
         # handle hook z reshaping if needed.
         x = self.reshape_fn_in(x)  # type: ignore
-
+        
         # apply b_dec_to_input if using that method.
         sae_in = self.hook_sae_input(x - (self.b_dec * self.cfg.apply_b_dec_to_input))
-
         # Gating path with Heaviside step function
         gating_pre_activation = sae_in @ self.W_enc + self.b_gate
-        active_features = (gating_pre_activation > 0).float()
+        active_features = (gating_pre_activation > 0).to(self.dtype)
 
         # Magnitude path with weight sharing
         magnitude_pre_activation = sae_in @ (self.W_enc * self.r_mag.exp()) + self.b_mag
@@ -301,7 +302,6 @@ class TrainingSAE(SAE):
         feature_magnitudes = self.activation_fn(
             magnitude_pre_activation
         )  # magnitude_pre_activation_noised)
-
         # Return both the gated feature activations and the magnitude pre-activations
         return (
             active_features * feature_magnitudes,
@@ -329,7 +329,6 @@ class TrainingSAE(SAE):
         # hidden pre.
         feature_acts, _ = self.encode_with_hidden_pre_fn(sae_in)
         sae_out = self.decode(feature_acts)
-
         # JACOB
         if self.gsae:
             assert len(sae_in.shape) == 2 # expect [batch d_model]
@@ -377,7 +376,6 @@ class TrainingSAE(SAE):
 
         if self.cfg.architecture == "gated":
             # Gated SAE Loss Calculation
-
             # Shared variables
             sae_in_centered = (
                 self.reshape_fn_in(sae_in) - self.b_dec * self.cfg.apply_b_dec_to_input

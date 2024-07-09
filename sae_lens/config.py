@@ -27,10 +27,13 @@ class LanguageModelSAERunnerConfig:
 
     Args:
         JACOB'S ADDITIONS:
-        gsae_path (str): Huggingface path to raw GSAE weights, without the ".safetensors" suffix. E.g. "https://huggingface.co/jacobcd52/mats-saes/raw/main/gpt2_resid_8_gated_gsae"
+        gsae_repo (str) : Huggingface repo containing GSAE weights
+        gsae_filename (str) : name of .safetensors file containing GSAE weights
+        gsae_cfg_filename (str) : name of .json gile containing config
         control_dataset_path (str): Huggingface repo name containing an unstructured dataset used as a control. E.g. "NeelNanda/openwebtext-tokenized-9b
         is_control_dataset_tokenized (bool): self-explanatory
         control_mixture (float): The fraction of each batch of activations fed to the SAE which came from the control dataset.
+        save_final_checkpoint_locally (bool) = True
 
         # pre-existing stuff
         model_name (str): The name of the model to use. This should be the name of the model in the Hugging Face model hub.
@@ -119,6 +122,7 @@ class LanguageModelSAERunnerConfig:
     control_dataset_path : Optional[str] = None
     is_control_dataset_tokenized : bool = True
     control_mixture : float = 0.01
+    save_final_checkpoint_locally : bool = True
 
     # Data Generating Function (Model + Training Distibuion)
     model_name: str = "gelu-2l"
@@ -405,7 +409,8 @@ class LanguageModelSAERunnerConfig:
             "gsae_cfg_filename" : self.gsae_cfg_filename,
             "control_dataset_path" : self.control_dataset_path,
             "is_control_dataset_tokenized" : self.is_control_dataset_tokenized,
-            "control_mixture" : self.control_mixture
+            "control_mixture" : self.control_mixture,
+            "save_final_checkpoint_locally" : self.save_final_checkpoint_locally
         }
 
     def to_dict(self) -> dict[str, Any]:

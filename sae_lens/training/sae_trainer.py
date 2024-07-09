@@ -9,7 +9,7 @@ from tqdm import tqdm
 from transformer_lens.hook_points import HookedRootModule
 
 from sae_lens import __version__
-from sae_lens.config import LanguageModelSAERunnerConfig
+from sae_lens.config import LanguageModelSAERunnerConfig, DTYPE_MAP
 from sae_lens.evals import run_evals
 from sae_lens.training.activations_store import ActivationsStore
 from sae_lens.training.optim import L1Scheduler, get_lr_scheduler
@@ -156,7 +156,7 @@ class SAETrainer:
         # Train loop
         while self.n_training_tokens < self.cfg.total_training_tokens:
             # Do a training step.
-            layer_acts = self.activation_store.next_batch()[:, 0, :].to(self.sae.device)
+            layer_acts = self.activation_store.next_batch()[:, 0, :].to(DTYPE_MAP[self.cfg.dtype]).to(self.sae.device)
             self.n_training_tokens += self.cfg.train_batch_size_tokens
 
             step_output = self._train_step(sae=self.sae, sae_in=layer_acts)
@@ -174,11 +174,12 @@ class SAETrainer:
 
 
         # save final sae group to checkpoints folder
-        self.save_checkpoint(
-            trainer=self,
-            checkpoint_name=f"final_{self.n_training_tokens}",
-            wandb_aliases=["final_model"],
-        )
+        if self.cfg.save_final_checkpoint_locally:
+            self.save_checkpoint(
+                trainer=self,
+                checkpoint_name=f"final_{self.n_training_tokens}",
+                wandb_aliases=["final_model"],
+            )
 
         pbar.close()
         return self.sae
@@ -329,16 +330,16 @@ class SAETrainer:
                 model_kwargs=self.cfg.model_kwargs,
             )
 
-            W_dec_norm_dist = self.sae.W_dec.norm(dim=1).detach().cpu().numpy()
+            W_dec_norm_dist = self.sae.W_dec.norm(dim=1).to(torch.float32).detach().cpu().numpy()
             eval_metrics["weights/W_dec_norms"] = wandb.Histogram(W_dec_norm_dist)  # type: ignore
 
             if self.sae.cfg.architecture == "standard":
-                b_e_dist = self.sae.b_enc.detach().cpu().numpy()
+                b_e_dist = self.sae.b_enc.to(torch.float32).detach().cpu().numpy()
                 eval_metrics["weights/b_e"] = wandb.Histogram(b_e_dist)  # type: ignore
             elif self.sae.cfg.architecture == "gated":
-                b_gate_dist = self.sae.b_gate.detach().cpu().numpy()
+                b_gate_dist = self.sae.b_gate.to(torch.float32).detach().cpu().numpy()
                 eval_metrics["weights/b_gate"] = wandb.Histogram(b_gate_dist)  # type: ignore
-                b_mag_dist = self.sae.b_mag.detach().cpu().numpy()
+                b_mag_dist = self.sae.b_mag.to(torch.float32).detach().cpu().numpy()
                 eval_metrics["weights/b_mag"] = wandb.Histogram(b_mag_dist)  # type: ignore
 
             wandb.log(
@@ -351,7 +352,7 @@ class SAETrainer:
     def _build_sparsity_log_dict(self) -> dict[str, Any]:
 
         log_feature_sparsity = _log_feature_sparsity(self.feature_sparsity)
-        wandb_histogram = wandb.Histogram(log_feature_sparsity.numpy())
+        wandb_histogram = wandb.Histogram(log_feature_sparsity.to(torch.float32).numpy())
         return {
             "metrics/mean_log10_feature_sparsity": log_feature_sparsity.mean().item(),
             "plots/feature_density_line_chart": wandb_histogram,

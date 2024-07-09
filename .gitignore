@@ -1,3 +1,7 @@
+# large files
+sae_lens/jacob/temp_sae
+sae_lens/jacob/temp_gsae
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]

@@ -1,6 +1,8 @@
 import io
 import json
 import sys
+sys.path.append("/root/specialised-SAEs/sae_lens/")
+
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterator, Literal, cast
@@ -9,11 +11,12 @@ import torch
 from datasets import Dataset, DatasetDict, load_dataset
 from huggingface_hub import HfApi
 from transformers import AutoTokenizer, PreTrainedTokenizerBase
-from typing_extensions import deprecated
+# from typing_extensions import deprecated
 
 from sae_lens import __version__
 from sae_lens.batching import concat_and_batch_sequences
 from sae_lens.config import PretokenizeRunnerConfig
+
 
 
 @dataclass
@@ -141,12 +144,12 @@ def push_to_hugging_face_hub(
     )
 
 
-@deprecated("Use PretokenizeRunner instead")
-def pretokenize_runner(
-    cfg: PretokenizeRunnerConfig,
-):
-    runner = PretokenizeRunner(cfg)
-    return runner.run()
+# @deprecated("Use PretokenizeRunner instead")
+# def pretokenize_runner(
+#     cfg: PretokenizeRunnerConfig,
+# ):
+#     runner = PretokenizeRunner(cfg)
+#     return runner.run()
 
 
 class PretokenizeRunner:

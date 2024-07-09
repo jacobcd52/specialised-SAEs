@@ -6,6 +6,7 @@ from sae_lens.sae_training_runner import SAETrainingRunner
 import logging
 logger = logging.getLogger()
 logger.setLevel(logging.ERROR)
+import torch
 
 from huggingface_hub import login, HfApi
 login(token="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")
@@ -14,7 +15,7 @@ api = HfApi()
 
 
 
-total_training_steps = 3_000 
+total_training_steps = 5000
 batch_size = 4096*2
 total_training_tokens = total_training_steps * batch_size
 
@@ -24,12 +25,16 @@ l1_warm_up_steps = total_training_steps // 20  # 5% of training
 
 
 lr = 1e-3
-for l1_coefficient in [2,3,4,5,6]:
+for l1_coefficient in [1.0, 3.0, 0.5, 5.0, 2.0]:
     for control_mixture in [0.0]:
-        for expansion_factor in [0.5, 2]:
+        for expansion_factor in [2]:
         
             cfg = LanguageModelSAERunnerConfig(
                 # JACOB
+                # autocast=True,
+                # autocast_lm=True,
+                model_from_pretrained_kwargs = {"dtype" : "bfloat16"},
+                b_dec_init_method="geometric_median",
                 gsae_repo = 'jacobcd52/gemma2-gsae',
                 gsae_filename = 'sae_weights.safetensors',
                 gsae_cfg_filename = 'cfg.json',
@@ -50,7 +55,6 @@ for l1_coefficient in [2,3,4,5,6]:
                 # SAE Parameters
                 mse_loss_normalization=None,  # We won't normalize the mse loss,
                 expansion_factor=expansion_factor,  # the width of the SAE. Larger will result in better stats but slower training.
-                b_dec_init_method="zeros",  # The geometric median can be used to initialize the decoder weights.
                 apply_b_dec_to_input=True,  # We won't apply the decoder weights to the input.
                 normalize_sae_decoder=False,
                 scale_sparsity_penalty_by_decoder_norm=False,
@@ -72,7 +76,7 @@ for l1_coefficient in [2,3,4,5,6]:
                 # Activation Store Parameters
                 n_batches_in_buffer=64,  # controls how many activations we store / shuffle.
                 training_tokens=total_training_tokens,  # 100 million tokens is quite a few, but we want to see good stats. Get a coffee, come back.
-                store_batch_size_prompts=16,
+                store_batch_size_prompts=32,
                 # Resampling protocol
                 use_ghost_grads=False,  # we don't use ghost grads anymore.
                 feature_sampling_window=1000,  # this controls our reporting of feature sparsity stats
@@ -89,11 +93,9 @@ for l1_coefficient in [2,3,4,5,6]:
                 seed=42,
                 n_checkpoints=0,
                 checkpoint_path=f"gpt2_gsae_l1_coeff={l1_coefficient}_expansion={expansion_factor}_tokens={batch_size*total_training_steps}_lr={lr}",
-                dtype="float16"
+                dtype="bfloat16"
             )
-            print("instantiating ssae")
             ssae = SAETrainingRunner(cfg)
-            print("finished instantiating ssae")
             ssae.run()
 
             # upload final checkpoint to HF

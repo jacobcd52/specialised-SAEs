@@ -296,7 +296,7 @@ class SAE(HookedRootModule):
                 x = x.to(self.dtype)
                 sae_in = self.reshape_fn_in(x)  # type: ignore
                 gating_pre_activation = sae_in @ self.W_enc + self.b_gate
-                active_features = (gating_pre_activation > 0).float()
+                active_features = (gating_pre_activation > 0).to(self.dtype)
 
                 # Magnitude path with weight sharing
                 magnitude_pre_activation = self.hook_sae_acts_pre(
@@ -331,7 +331,7 @@ class SAE(HookedRootModule):
 
         # Gating path
         gating_pre_activation = sae_in @ self.W_enc[:, feature_idx] + self.b_gate[feature_idx]
-        active_features = (gating_pre_activation > 0).float()
+        active_features = (gating_pre_activation > 0).to(self.dtype)
 
         # Magnitude path with weight sharing
         magnitude_pre_activation = self.hook_sae_acts_pre(
@@ -350,7 +350,7 @@ class SAE(HookedRootModule):
         """
         Calculate SAE features from inputs
         """
-        # option to only run encode certain features. Useful for generating dashboards.
+        # option to only run encode on certain features. Useful for generating dashboards.
         if feature_idx is None:
             feature_idx = list(range(self.cfg.d_sae))
         # move x to correct dtype
