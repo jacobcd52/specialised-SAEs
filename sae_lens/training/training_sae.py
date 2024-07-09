@@ -46,7 +46,8 @@ class TrainStepOutput:
 class TrainingSAEConfig(SAEConfig):
     # JACOB
     gsae_repo : Optional[str]
-    gsae_filename_no_suffix : Optional[str]
+    gsae_filename : Optional[str]
+    gsae_cfg_filename : Optional[str]
     control_dataset_path : Optional[str]
     control_mixture : float
     is_control_dataset_tokenized : bool
@@ -71,7 +72,8 @@ class TrainingSAEConfig(SAEConfig):
         return cls(
             # JACOB
             gsae_repo = cfg.gsae_repo,
-            gsae_filename_no_suffix = cfg.gsae_filename_no_suffix,
+            gsae_filename = cfg.gsae_filename,
+            gsae_cfg_filename = cfg.gsae_cfg_filename,
             control_dataset_path = cfg.control_dataset_path,
             control_mixture=cfg.control_mixture,
             is_control_dataset_tokenized = cfg.is_control_dataset_tokenized,
@@ -154,7 +156,8 @@ class TrainingSAEConfig(SAEConfig):
 
             # JACOB
             "gsae_repo" : self.gsae_repo,
-            "gsae_filename_no_suffix" : self.gsae_filename_no_suffix,
+            "gsae_filename" : self.gsae_filename,
+            "gsae_cfg_filename" : self.gsae_cfg_filename,
             "control_dataset_path" : self.control_dataset_path,
             "control_mixture" : self.control_mixture,
             "is_control_dataset_tokenized" : self.is_control_dataset_tokenized
@@ -207,15 +210,20 @@ class TrainingSAE(SAE):
         self.gsae = None
 
         if self.cfg.gsae_repo:
-            self.gsae = load_sae_from_hf(self.cfg.gsae_repo, self.cfg.gsae_filename_no_suffix, self.cfg.device)
+            self.gsae = load_sae_from_hf(self.cfg.gsae_repo, self.cfg.gsae_filename, self.cfg.gsae_cfg_filename, self.cfg.device)
             if self.gsae:
                 for param in self.gsae.parameters():
                     param.requires_grad = False
+                print()
+                print("gsae loaded")
+                print()
                 assert(self.gsae.use_error_term == False)
-                assert self.gsae, "GSAE not loaded"
                 assert self.gsae.cfg.hook_name == self.cfg.hook_name, f"hook_name mismatch: {self.gsae.cfg.hook_name} vs {self.cfg.hook_name}"
                 assert self.gsae.cfg.model_name == self.cfg.model_name, f"model_name mismatch: {self.gsae.cfg.model_name} vs {self.cfg.model_name}"
-
+            else:
+                print()
+                print("no gsae loaded")
+                print()
         if not self.cfg.gsae_repo and self.cfg.control_dataset_path:
             raise ValueError("control dataset was supplied but no GSAE was given")
 

@@ -31,9 +31,9 @@ import time
 # Library imports
 
 from sae_vis.utils_fns import get_device
-from sae_vis_vedang.model_fns import AutoEncoder
-from sae_vis_vedang.data_storing_fns import SaeVisData
-from sae_vis_vedang.data_config_classes import SaeVisConfig
+from sae_vis.model_fns import AutoEncoder
+from sae_vis.data_storing_fns import SaeVisData
+from sae_vis.data_config_classes import SaeVisConfig
 
 #%%
 def load_sae_from_hf(repo_id, filename_no_suffix, device):
@@ -114,7 +114,7 @@ lr_warm_up_steps = 0
 lr_decay_steps = total_training_steps // 5  # 20% of training
 l1_warm_up_steps = total_training_steps // 20  # 5% of training
 
-control_mixture = 0.9
+control_mixture = 1.0
 lr = 1e-3
 l1_coefficient = 1
 expansion_factor = 1
@@ -185,10 +185,10 @@ print("instantiating ssae")
 ssae = SAETrainingRunner(cfg)
 model = ssae.model
 activation_store = ssae.activations_store
-all_tokens_gpt = get_tokens(activation_store, control_mixture=1.0, n_batches_to_sample_from = 2**10)
+all_tokens_gpt = get_tokens(activation_store, control_mixture=0.0, n_batches_to_sample_from = 2**10)
 
 #%%
-sae = load_sae_from_hf("jacobcd52/mats-saes", "specialisedgpt2-small_l1_coeff=6.0_expansion=2_tokens=24576000_lr=0.001physics-papers_control_mix=0.0", "cuda")
+sae = load_sae_from_hf("jacobcd52/gpt2-gsae-phys", "l1_coeff=6_expansion=2", "cuda")
 
 #%%
 
@@ -212,7 +212,7 @@ sae_vis_data_gpt = SaeVisData.create(
     cfg = feature_vis_config_gpt,
 )
 
-filename = "phys_features_owt.html"
+filename = "phys_features.html"
 sae_vis_data_gpt.save_feature_centric_vis(filename)
 
 # %%

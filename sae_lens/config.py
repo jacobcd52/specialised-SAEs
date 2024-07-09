@@ -114,7 +114,8 @@ class LanguageModelSAERunnerConfig:
     """
     # JACOB
     gsae_repo : Optional[str] = None
-    gsae_filename_no_suffix : Optional[str] = None
+    gsae_filename : Optional[str] = None
+    gsae_cfg_filename : Optional[str] = None
     control_dataset_path : Optional[str] = None
     is_control_dataset_tokenized : bool = True
     control_mixture : float = 0.01
@@ -400,7 +401,8 @@ class LanguageModelSAERunnerConfig:
 
             # JACOB
             "gsae_repo" : self.gsae_repo,
-            "gsae_filename_no_suffix" : self.gsae_filename_no_suffix,
+            "gsae_filename" : self.gsae_filename,
+            "gsae_cfg_filename" : self.gsae_cfg_filename,
             "control_dataset_path" : self.control_dataset_path,
             "is_control_dataset_tokenized" : self.is_control_dataset_tokenized,
             "control_mixture" : self.control_mixture

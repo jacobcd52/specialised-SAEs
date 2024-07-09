@@ -25,14 +25,15 @@ l1_warm_up_steps = total_training_steps // 20  # 5% of training
 
 lr = 1e-3
 for l1_coefficient in [2,3,4,5,6]:
-    for control_mixture in [0.0, 0.1]:
+    for control_mixture in [0.0]:
         for expansion_factor in [0.5, 2]:
         
             cfg = LanguageModelSAERunnerConfig(
                 # JACOB
-                gsae_repo = 'jacobcd52/mats=gpt2-saes',
-                gsae_filename_no_suffix= 'gpt2-small_l1_coeff=45_expansion=64_tokens=409600000_lr=1e-05',
-                is_control_dataset_tokenized=True,
+                gsae_repo = 'jacobcd52/gemma2-gsae',
+                gsae_filename = 'sae_weights.safetensors',
+                gsae_cfg_filename = 'cfg.json',
+                # is_control_dataset_tokenized=True,
                 control_mixture=control_mixture,
                 control_dataset_path="NeelNanda/openwebtext-tokenized-9b" if control_mixture > 0 else None,
 
@@ -41,10 +42,10 @@ for l1_coefficient in [2,3,4,5,6]:
 
                 # Data Generating Function (Model + Training Distribution)
                 architecture="gated",  # we'll use the gated variant.
-                model_name="gpt2-small",  # our model (more options here: https://neelnanda-io.github.io/TransformerLens/generated/model_properties_table.html)
-                hook_name="blocks.8.hook_resid_pre",  # A valid hook point (see more details here: https://neelnanda-io.github.io/TransformerLens/generated/demos/Main_Demo.html#Hook-Points)
-                hook_layer=8,  # Only one layer in the model.
-                d_in=768,  # the width of the mlp output.
+                model_name="gemma-2b-it",  # our model (more options here: https://neelnanda-io.github.io/TransformerLens/generated/model_properties_table.html)
+                hook_name="blocks.12.hook_resid_pre",  # A valid hook point (see more details here: https://neelnanda-io.github.io/TransformerLens/generated/demos/Main_Demo.html#Hook-Points)
+                hook_layer=12,  # Only one layer in the model.
+                d_in=2048,  # the width of the mlp output.
                 streaming=True,  # we could pre-download the token dataset if it was small.
                 # SAE Parameters
                 mse_loss_normalization=None,  # We won't normalize the mse loss,
@@ -79,7 +80,7 @@ for l1_coefficient in [2,3,4,5,6]:
                 dead_feature_threshold=1e-4,  # would effect resampling or ghost grads if we were using it.
                 # WANDB
                 log_to_wandb=True,  # always use wandb unless you are just testing code.
-                wandb_project="phys-SSAE-wide-gsae",
+                wandb_project="gemma2-ssae-phys",
                 run_name = f"l1={l1_coefficient}_expansion={expansion_factor}_control_mix={control_mixture}_tokens={batch_size*total_training_steps}_lr={lr}",
                 wandb_log_frequency=30,
                 eval_every_n_wandb_logs=20,
@@ -88,7 +89,7 @@ for l1_coefficient in [2,3,4,5,6]:
                 seed=42,
                 n_checkpoints=0,
                 checkpoint_path=f"gpt2_gsae_l1_coeff={l1_coefficient}_expansion={expansion_factor}_tokens={batch_size*total_training_steps}_lr={lr}",
-                dtype="float32"
+                dtype="float16"
             )
             print("instantiating ssae")
             ssae = SAETrainingRunner(cfg)
@@ -108,21 +109,21 @@ for l1_coefficient in [2,3,4,5,6]:
 
                 # get descriptive file name
 
-                name = f"{cfg.model_name}_l1_coeff={l1_coefficient}_expansion={expansion_factor}_tokens={batch_size*total_training_steps}_lr={lr}"
+                name = f"l1_coeff={l1_coefficient}_expansion={expansion_factor}"
                 if cfg.gsae_repo:
-                    name = "specialised_wideGSAE_" + name + f"{cfg.dataset_path.split('/')[-1]}_control_mix={cfg.control_mixture}"
+                    name = "_control_mix={cfg.control_mixture}"
 
                 # Upload the files to a new repository
                 api.upload_file(
                     path_or_fileobj=cfg_path,
                     path_in_repo = name + "_cfg.json",
-                    repo_id="jacobcd52/mats-gpt2-saes"
+                    repo_id="jacobcd52/gemma2-ssae-phys"
                 )
 
                 api.upload_file(
                     path_or_fileobj=sae_path,
                     path_in_repo = name + ".safetensors",
-                    repo_id="jacobcd52/mats-gpt2-saes"
+                    repo_id="jacobcd52/gemma2-ssae-phys"
                 )
             else:
                 print("saving failed - no final checkpoint found!")

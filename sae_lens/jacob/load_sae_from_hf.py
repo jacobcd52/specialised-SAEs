@@ -2,7 +2,7 @@ import os
 from huggingface_hub import hf_hub_download
 from sae_lens.sae import SAE
 
-def load_sae_from_hf(repo_id, filename_no_suffix, device):
+def load_sae_from_hf(repo_id, filename, cfg_filename, device):
     # Make a directory to store the weights and cfg
     temp_gsae_path = "temp_sae"
     os.makedirs(temp_gsae_path, exist_ok=True)
@@ -16,7 +16,7 @@ def load_sae_from_hf(repo_id, filename_no_suffix, device):
         print(f"Downloading weights from Hugging Face Hub")
         downloaded_weights_path = hf_hub_download(
             repo_id=repo_id, 
-            filename=f"{filename_no_suffix}.safetensors", 
+            filename=filename, 
             local_dir=temp_gsae_path
         )
         os.rename(downloaded_weights_path, temp_weights_path)
@@ -26,7 +26,7 @@ def load_sae_from_hf(repo_id, filename_no_suffix, device):
         print(f"Downloading cfg from Hugging Face Hub")
         downloaded_cfg_path = hf_hub_download(
             repo_id=repo_id, 
-            filename=f"{filename_no_suffix}_cfg.json", 
+            filename=cfg_filename, 
             local_dir=temp_gsae_path
         )
         os.rename(downloaded_cfg_path, temp_cfg_path)

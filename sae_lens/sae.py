@@ -28,9 +28,6 @@ SAE_CFG_PATH = "cfg.json"
 
 @dataclass
 class SAEConfig:
-    # architecture details
-    architecture: Literal["standard", "gated"]
-
     # forward pass details.
     d_in: int
     d_sae: int
@@ -53,6 +50,7 @@ class SAEConfig:
     dtype: str
     device: str
     sae_lens_training_version: Optional[str]
+    architecture: Literal["standard", "gated"]
 
     @classmethod
     def from_dict(cls, config_dict: dict[str, Any]) -> "SAEConfig":
