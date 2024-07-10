@@ -3,6 +3,7 @@ sys.path.append("/root/specialised-SAEs/")
 import os
 from sae_lens.config import LanguageModelSAERunnerConfig
 from sae_lens.sae_training_runner import SAETrainingRunner
+from sae_lens.jacob.load_sae_from_hf import load_sae_from_hf
 import logging
 logger = logging.getLogger()
 logger.setLevel(logging.ERROR)
@@ -15,42 +16,45 @@ api = HfApi()
 
 
 
-total_training_steps = 5000
-batch_size = 4096*2
+total_training_steps = 200
+batch_size = 4096
 total_training_tokens = total_training_steps * batch_size
 
 lr_warm_up_steps = 0
 lr_decay_steps = total_training_steps // 5  # 20% of training
 l1_warm_up_steps = total_training_steps // 20  # 5% of training
 
+expansion_factor=64
 
-lr = 1e-3
-for l1_coefficient in [1.0, 3.0, 0.5, 5.0, 2.0]:
+for l1_coefficient in [1, 10, 20]:
     for control_mixture in [0.0]:
-        for expansion_factor in [2]:
+        for lr in [1e-5, 1e-4, 1e-3]:
         
             cfg = LanguageModelSAERunnerConfig(
                 # JACOB
                 # autocast=True,
                 # autocast_lm=True,
-                model_from_pretrained_kwargs = {"dtype" : "bfloat16"},
-                b_dec_init_method="geometric_median",
-                gsae_repo = 'jacobcd52/gemma2-gsae',
-                gsae_filename = 'sae_weights.safetensors',
-                gsae_cfg_filename = 'cfg.json',
+                # model_from_pretrained_kwargs = {"dtype" : "bfloat16"},
+                # b_dec_init_method="geometric_median",
+                # gsae_repo = 'jacobcd52/gemma2-gsae',
+                # gsae_filename = 'sae_weights.safetensors',
+                # gsae_cfg_filename = 'cfg.json',
                 # is_control_dataset_tokenized=True,
-                control_mixture=control_mixture,
-                control_dataset_path="NeelNanda/openwebtext-tokenized-9b" if control_mixture > 0 else None,
-
+                # control_mixture=control_mixture,
+                # control_dataset_path="NeelNanda/openwebtext-tokenized-9b" if control_mixture > 0 else None,
+                # save_final_checkpoint_locally = False,
+                dtype="float32",
                 dataset_path='jacobcd52/physics-papers',
                 is_dataset_tokenized=False,
+                wandb_project="gpt2-gsae-finetune-phys",
+                from_pretrained_path="/root/specialised-SAEs/sae_lens/jacob/temp_sae",
 
                 # Data Generating Function (Model + Training Distribution)
                 architecture="gated",  # we'll use the gated variant.
-                model_name="gemma-2b-it",  # our model (more options here: https://neelnanda-io.github.io/TransformerLens/generated/model_properties_table.html)
-                hook_name="blocks.12.hook_resid_pre",  # A valid hook point (see more details here: https://neelnanda-io.github.io/TransformerLens/generated/demos/Main_Demo.html#Hook-Points)
-                hook_layer=12,  # Only one layer in the model.
-                d_in=2048,  # the width of the mlp output.
+                model_name="gpt2-small",  # our model (more options here: https://neelnanda-io.github.io/TransformerLens/generated/model_properties_table.html)
+                hook_name="blocks.8.hook_resid_pre",  # A valid hook point (see more details here: https://neelnanda-io.github.io/TransformerLens/generated/demos/Main_Demo.html#Hook-Points)
+                hook_layer=8,  # Only one layer in the model.
+                d_in=768,  # the width of the mlp output.
                 streaming=True,  # we could pre-download the token dataset if it was small.
                 # SAE Parameters
                 mse_loss_normalization=None,  # We won't normalize the mse loss,
@@ -84,16 +88,15 @@ for l1_coefficient in [1.0, 3.0, 0.5, 5.0, 2.0]:
                 dead_feature_threshold=1e-4,  # would effect resampling or ghost grads if we were using it.
                 # WANDB
                 log_to_wandb=True,  # always use wandb unless you are just testing code.
-                wandb_project="gemma2-ssae-phys",
                 run_name = f"l1={l1_coefficient}_expansion={expansion_factor}_control_mix={control_mixture}_tokens={batch_size*total_training_steps}_lr={lr}",
-                wandb_log_frequency=30,
-                eval_every_n_wandb_logs=20,
+                wandb_log_frequency=10, #30
+                eval_every_n_wandb_logs=2, #20
                 # Misc
                 device="cuda",
                 seed=42,
                 n_checkpoints=0,
                 checkpoint_path=f"gpt2_gsae_l1_coeff={l1_coefficient}_expansion={expansion_factor}_tokens={batch_size*total_training_steps}_lr={lr}",
-                dtype="bfloat16"
+
             )
             ssae = SAETrainingRunner(cfg)
             ssae.run()
@@ -111,7 +114,7 @@ for l1_coefficient in [1.0, 3.0, 0.5, 5.0, 2.0]:
 
                 # get descriptive file name
 
-                name = f"l1_coeff={l1_coefficient}_expansion={expansion_factor}"
+                name = f"l1_coeff={l1_coefficient}_tokens={total_training_tokens}_lr={lr}"
                 if cfg.gsae_repo:
                     name = "_control_mix={cfg.control_mixture}"
 
@@ -119,13 +122,13 @@ for l1_coefficient in [1.0, 3.0, 0.5, 5.0, 2.0]:
                 api.upload_file(
                     path_or_fileobj=cfg_path,
                     path_in_repo = name + "_cfg.json",
-                    repo_id="jacobcd52/gemma2-ssae-phys"
+                    repo_id="jacobcd52/gpt2-gsae-finetune-phys"
                 )
 
                 api.upload_file(
                     path_or_fileobj=sae_path,
                     path_in_repo = name + ".safetensors",
-                    repo_id="jacobcd52/gemma2-ssae-phys"
+                    repo_id="jacobcd52/gpt2-gsae-finetune-phys"
                 )
             else:
                 print("saving failed - no final checkpoint found!")

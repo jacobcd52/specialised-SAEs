@@ -319,7 +319,7 @@ class SAETrainer:
         # record loss frequently, but not all the time.
         if (self.n_training_steps) % (
             self.cfg.wandb_log_frequency * self.cfg.eval_every_n_wandb_logs
-        ) == 0:
+        ) == 1:
             self.sae.eval()
             eval_metrics = run_evals(
                 sae=self.sae,

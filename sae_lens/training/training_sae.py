@@ -14,6 +14,8 @@ from torch import nn
 from safetensors import safe_open
 import json
 from huggingface_hub import hf_hub_download
+from dataclasses import dataclass, fields
+from typing import Any, Optional, Dict
 
 
 
@@ -45,15 +47,6 @@ class TrainStepOutput:
 
 @dataclass
 class TrainingSAEConfig(SAEConfig):
-    # JACOB
-    gsae_repo : Optional[str]
-    gsae_filename : Optional[str]
-    gsae_cfg_filename : Optional[str]
-    control_dataset_path : Optional[str]
-    control_mixture : float
-    is_control_dataset_tokenized : bool
-    save_final_checkpoint_locally : bool
-
     # Sparsity Loss Calculations
     l1_coefficient: float
     lp_norm: float
@@ -65,6 +58,15 @@ class TrainingSAEConfig(SAEConfig):
     decoder_heuristic_init: bool = False
     init_encoder_as_decoder_transpose: bool = False
     scale_sparsity_penalty_by_decoder_norm: bool = False
+
+    # JACOB
+    gsae_repo : Optional[str] = None
+    gsae_filename : Optional[str] = None
+    gsae_cfg_filename : Optional[str] = None
+    control_dataset_path : Optional[str] = None
+    control_mixture : float = 0.0
+    is_control_dataset_tokenized : bool = True
+    save_final_checkpoint_locally : bool = True
 
     @classmethod
     def from_sae_runner_config(
@@ -115,8 +117,10 @@ class TrainingSAEConfig(SAEConfig):
         )
 
     @classmethod
-    def from_dict(cls, config_dict: dict[str, Any]) -> "TrainingSAEConfig":
-        return TrainingSAEConfig(**config_dict)
+    def from_dict(cls, config_dict: Dict[str, Any]) -> "TrainingSAEConfig":
+        field_names = {f.name for f in fields(cls)}
+        filtered_dict = {k: v for k, v in config_dict.items() if k in field_names}
+        return cls(**filtered_dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
