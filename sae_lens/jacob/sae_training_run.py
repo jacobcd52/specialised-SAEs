@@ -26,7 +26,7 @@ l1_warm_up_steps = total_training_steps // 20  # 5% of training
 
 expansion_factor=2
 
-for l1_coefficient in [20]:
+for l1_coefficient in [20, 10, 5]:
     for control_mixture in [0.0]:
         for lr in [1e-3]:
         
@@ -45,6 +45,8 @@ for l1_coefficient in [20]:
                 dataset_path='jacobcd52/physics-papers',
                 is_dataset_tokenized=False,
                 wandb_project="gemma2-ssae-phys",
+                context_size=128,
+
                 # from_pretrained_path="/root/specialised-SAEs/sae_lens/jacob/temp_sae",
 
                 # Data Generating Function (Model + Training Distribution)
@@ -74,7 +76,6 @@ for l1_coefficient in [20]:
                 l1_warm_up_steps=l1_warm_up_steps,  # this can help avoid too many dead features initially.
                 lp_norm=1.0,  # the L1 penalty (and not a Lp for p < 1)
                 train_batch_size_tokens=batch_size,
-                context_size=256,  # will control the lenght of the prompts we feed to the model. Larger is better but slower. so for the tutorial we'll use a short one.
                 # Activation Store Parameters
                 n_batches_in_buffer=64,  # controls how many activations we store / shuffle.
                 training_tokens=total_training_tokens,  # 100 million tokens is quite a few, but we want to see good stats. Get a coffee, come back.
