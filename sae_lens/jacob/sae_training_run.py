@@ -10,44 +10,57 @@ logger.setLevel(logging.ERROR)
 import torch
 
 from huggingface_hub import login, HfApi
-login(token="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")
+login(token="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")
 api = HfApi()
 
 
+# percent of params that are SSAE = (ssae_expansion/4) / (n_layers)
+# percent of params that are GSAE = (gsae_expansion/4) / (n_layers)
+
+# SSAE
+# in units of model FPs, a training step requires following compute:
+# 1 + 1*(percent_gsae) + 2*(percent_ssae) = 1 + (2*ssae_expansion + gsae_expansion)/(4*n_layers)
+
+# GSAE-finetune
+# training step compute:
+# 1 + 2*(percent_gsae) = 1 + gsae_expansion/(2*n_layers)
 
 
-total_training_steps = 5000
-batch_size = 8192
+# so GSAE_compute = SSAE_compute + gsae_expansion/(2*n_layers)
+
+
+
+total_training_steps = 5000//16
+batch_size = 8192*4
 total_training_tokens = total_training_steps * batch_size
 
 lr_warm_up_steps = 0
 lr_decay_steps = total_training_steps // 5  # 20% of training
 l1_warm_up_steps = total_training_steps // 20  # 5% of training
 
-expansion_factor=2
+expansion_factor=16
 
-for l1_coefficient in [20, 10, 5]:
-    for control_mixture in [0.0]:
-        for lr in [1e-3]:
+for lr in [1e-5]:
+    for l1_coefficient in [2, 5, 10]:
+        for control_mixture in [0.5, 0.1, 0.0]:
         
             cfg = LanguageModelSAERunnerConfig(
                 # JACOB
                 model_from_pretrained_kwargs = {"dtype" : "bfloat16"},
                 b_dec_init_method="geometric_median",
-                gsae_repo = 'jacobcd52/gemma2-gsae',
-                gsae_filename = 'sae_weights.safetensors',
-                gsae_cfg_filename = 'cfg.json',
-                is_control_dataset_tokenized=True,
+                # gsae_repo = 'jacobcd52/gemma2-gsae',
+                # gsae_filename = 'sae_weights.safetensors',
+                # gsae_cfg_filename = 'cfg.json',
+                control_dataset_path="Skylion007/openwebtext" if control_mixture > 0 else None,
+                is_control_dataset_tokenized=False,
                 control_mixture=control_mixture,
-                control_dataset_path="NeelNanda/openwebtext-tokenized-9b" if control_mixture > 0 else None,
                 save_final_checkpoint_locally = True,
                 dtype="bfloat16",
                 dataset_path='jacobcd52/physics-papers',
                 is_dataset_tokenized=False,
-                wandb_project="gemma2-ssae-phys",
+                wandb_project="gemma2-gsae-finetune-phys",
                 context_size=128,
-
-                # from_pretrained_path="/root/specialised-SAEs/sae_lens/jacob/temp_sae",
+                from_pretrained_path="/root/specialised-SAEs/sae_lens/jacob/temp_sae",
 
                 # Data Generating Function (Model + Training Distribution)
                 architecture="gated",  # we'll use the gated variant.
@@ -64,7 +77,6 @@ for l1_coefficient in [20, 10, 5]:
                 scale_sparsity_penalty_by_decoder_norm=False,
                 decoder_heuristic_init=True,
                 init_encoder_as_decoder_transpose=True,
-                # normalize_activations=False, JACOB
                 # Training Parameters
                 lr=lr,  # lower the better, we'll go fairly high to speed up the tutorial.
                 adam_beta1=0.9,  # adam params (default, but once upon a time we experimented with these.)
@@ -94,7 +106,7 @@ for l1_coefficient in [20, 10, 5]:
                 device="cuda",
                 seed=42,
                 n_checkpoints=0,
-                checkpoint_path=f"gpt2_gsae_l1_coeff={l1_coefficient}_expansion={expansion_factor}_tokens={batch_size*total_training_steps}_lr={lr}",
+                checkpoint_path=f"l1_coeff={l1_coefficient}_expansion={expansion_factor}_tokens={batch_size*total_training_steps}_lr={lr}",
 
             )
             ssae = SAETrainingRunner(cfg)
@@ -115,19 +127,19 @@ for l1_coefficient in [20, 10, 5]:
 
                 name = f"l1_coeff={l1_coefficient}_tokens={total_training_tokens}_lr={lr}"
                 if cfg.control_mixture > 0:
-                    name += "_control_mix={cfg.control_mixture}"
+                    name += f"_control_mix={cfg.control_mixture}"
 
                 # Upload the files to a new repository
                 api.upload_file(
                     path_or_fileobj=cfg_path,
                     path_in_repo = name + "_cfg.json",
-                    repo_id="jacobcd52/gemma2-ssae-phys"
+                    repo_id="jacobcd52/gemma2-gsae-finetune-phys"
                 )
 
                 api.upload_file(
                     path_or_fileobj=sae_path,
                     path_in_repo = name + ".safetensors",
-                    repo_id="jacobcd52/gemma2-ssae-phys"
+                    repo_id="jacobcd52/gemma2-gsae-finetune-phys"
                 )
             else:
                 print("saving failed - no final checkpoint found!")

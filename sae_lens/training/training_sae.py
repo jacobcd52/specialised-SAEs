@@ -236,8 +236,6 @@ class TrainingSAE(SAE):
                 print()
                 print("no gsae loaded")
                 print()
-        if not self.cfg.gsae_repo and self.cfg.control_dataset_path:
-            raise ValueError("control dataset was supplied but no GSAE was given")
 
 
 

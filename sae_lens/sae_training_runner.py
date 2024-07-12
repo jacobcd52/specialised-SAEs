@@ -57,8 +57,9 @@ class SAETrainingRunner:
 
         if self.cfg.from_pretrained_path is not None:
             self.sae = TrainingSAE.load_from_pretrained(
-                self.cfg.from_pretrained_path, self.cfg.device
+                self.cfg.from_pretrained_path, self.cfg.device, dtype=self.cfg.dtype
             )
+            print("pretrained SAE loaded. dtype = ", self.sae.dtype)
         else:
             self.sae = TrainingSAE(
                 TrainingSAEConfig.from_dict(
