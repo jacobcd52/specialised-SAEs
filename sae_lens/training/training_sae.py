@@ -337,7 +337,10 @@ class TrainingSAE(SAE):
             control_batch_size = int(sae_in.size(0) * self.cfg.control_mixture)
             # get sum of main MSE loss and control loss
             target = sae_in - self.gsae(sae_in) 
-            target[:control_batch_size] = 0 # for the control dataset, we want the SSAE to output 0
+            # if we're training a GSAE, we want the SSAE to output 0 on the control dataset
+            # otherwise, we just demand usual reconstruction on both control and main datasets
+            if self.gsae:
+                target[:control_batch_size] = 0
             per_item_mse_loss = self.mse_loss_fn(sae_out, target)
 
             # calculate control and main losses for logging
