@@ -30,27 +30,27 @@ api = HfApi()
 
 
 
-total_training_steps = 5000//8
-batch_size = 8192*2
+total_training_steps = 10_000
+batch_size = 8192//2
 total_training_tokens = total_training_steps * batch_size
 
 lr_warm_up_steps = 0
 lr_decay_steps = total_training_steps // 5  # 20% of training
 l1_warm_up_steps = total_training_steps // 20  # 5% of training
 
-expansion_factor=16
+expansion_factor=2
 
-for lr in [1e-4]:
-    for l1_coefficient in [1, 2, 5]:
-        for control_mixture in [0.5, 0.1, 0.0]:
+for lr in [1e-3]:
+    for l1_coefficient in [30]:
+        for control_mixture in [0.0]:
         
             cfg = LanguageModelSAERunnerConfig(
                 # JACOB
                 model_from_pretrained_kwargs = {"dtype" : "bfloat16"},
-                # b_dec_init_method="geometric_median",
-                # gsae_repo = 'jacobcd52/gemma2-gsae',
-                # gsae_filename = 'sae_weights.safetensors',
-                # gsae_cfg_filename = 'cfg.json',
+                b_dec_init_method="geometric_median",
+                gsae_repo = 'jacobcd52/gemma2-gsae',
+                gsae_filename = 'sae_weights.safetensors',
+                gsae_cfg_filename = 'cfg.json',
                 
                 apply_b_dec_to_input=False,  # We won't apply the decoder weights to the input.
 
@@ -61,9 +61,9 @@ for lr in [1e-4]:
                 dtype="bfloat16",
                 dataset_path='jacobcd52/physics-papers',
                 is_dataset_tokenized=False,
-                wandb_project="gemma2-gsae-finetune-phys-2",
+                wandb_project="gemma2-ssae-phys",
                 context_size=128,
-                from_pretrained_path="/root/specialised-SAEs/sae_lens/jacob/temp_sae",
+                # from_pretrained_path="/root/specialised-SAEs/sae_lens/jacob/temp_sae",
 
                 # Data Generating Function (Model + Training Distribution)
                 architecture="gated",  # we'll use the gated variant.
@@ -135,13 +135,13 @@ for lr in [1e-4]:
                 api.upload_file(
                     path_or_fileobj=cfg_path,
                     path_in_repo = name + "_cfg.json",
-                    repo_id="jacobcd52/gemma2-gsae-finetune-phys"
+                    repo_id="jacobcd52/gemma2-ssae-phys"
                 )
 
                 api.upload_file(
                     path_or_fileobj=sae_path,
                     path_in_repo = name + ".safetensors",
-                    repo_id="jacobcd52/gemma2-gsae-finetune-phys"
+                    repo_id="jacobcd52/gemma2-ssae-phys"
                 )
             else:
                 print("saving failed - no final checkpoint found!")
