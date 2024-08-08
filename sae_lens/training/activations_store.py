@@ -754,13 +754,11 @@ class ActivationsStore:
                     if s is not None:
                         break
                 except StopIteration:
-                    # Handle the case where there are no more elements in the iterator
-                    s = ""
+                    print("Reached end of dataset. Resetting iterator.")
+                    self.iterable_dataset = iter(self.dataset)
+                    s = next(self.iterable_dataset)[self.tokens_column]
                     break
 
-            # if s is None:
-            #     s = ""
-            # assert not (s is None), "Clean your dataset"
             tokens = (
                 self.model.to_tokens(
                     s,
@@ -775,24 +773,41 @@ class ActivationsStore:
                 len(tokens.shape) == 1
             ), f"tokens.shape should be 1D but was {tokens.shape}"
         else:
-            tokens = torch.tensor(
-                next(self.iterable_dataset)[self.tokens_column],
-                dtype=torch.long,
-                device=device,
-                requires_grad=False,
-            )
+            while True:
+                try:
+                    tokens = torch.tensor(
+                        next(self.iterable_dataset)[self.tokens_column],
+                        dtype=torch.long,
+                        device=device,
+                        requires_grad=False,
+                    )
+                    break
+                except StopIteration:
+                    print("Reached end of dataset. Resetting iterator.")
+                    self.iterable_dataset = iter(self.dataset)
+
             if (
                 not self.prepend_bos
                 and tokens[0] == self.model.tokenizer.bos_token_id  # type: ignore
             ):
                 tokens = tokens[1:]
+
         self.n_dataset_processed += 1
         return tokens
 
     def _get_next_control_dataset_tokens(self) -> torch.Tensor:
         device = self.device
         if not self.is_control_dataset_tokenized:
-            s = next(self.iterable_control_dataset)[self.control_tokens_column]
+            while True:
+                try:
+                    s = next(self.iterable_control_dataset)[self.control_tokens_column]
+                    break
+                except StopIteration:
+                    print("Reached end of control dataset. Resetting iterator.")
+                    self.iterable_control_dataset = iter(self.control_dataset)
+                    s = next(self.iterable_control_dataset)[self.control_tokens_column]
+                    break
+
             tokens = (
                 self.model.to_tokens(
                     s,
@@ -807,26 +822,34 @@ class ActivationsStore:
                 len(tokens.shape) == 1
             ), f"tokens.shape should be 1D but was {tokens.shape}"
         else:
-            tokens = torch.tensor(
-                next(self.iterable_control_dataset)[self.control_tokens_column],
-                dtype=torch.long,
-                device=device,
-                requires_grad=False,
-            )
-            if self.prepend_bos:
-                bos_token_id_tensor = torch.tensor(
-                    [self.model.tokenizer.bos_token_id],
-                    device=tokens.device,
-                    dtype=torch.long,
-                )
-                if tokens[0] != bos_token_id_tensor:
-                    tokens = torch.cat(
-                        (
-                            bos_token_id_tensor,
-                            tokens,
-                        ),
-                        dim=0,
+            while True:
+                try:
+                    tokens = torch.tensor(
+                        next(self.iterable_control_dataset)[self.control_tokens_column],
+                        dtype=torch.long,
+                        device=device,
+                        requires_grad=False,
                     )
+                    break
+                except StopIteration:
+                    print("Reached end of control dataset. Resetting iterator.")
+                    self.iterable_control_dataset = iter(self.control_dataset)
+
+        if self.prepend_bos:
+            bos_token_id_tensor = torch.tensor(
+                [self.model.tokenizer.bos_token_id],
+                device=tokens.device,
+                dtype=torch.long,
+            )
+            if tokens[0] != bos_token_id_tensor:
+                tokens = torch.cat(
+                    (
+                        bos_token_id_tensor,
+                        tokens,
+                    ),
+                    dim=0,
+                )
+
         self.n_dataset_processed += 1
         return tokens
 
