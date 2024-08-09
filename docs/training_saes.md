@@ -5,7 +5,7 @@ Methods development for training SAEs is rapidly evolving, so these docs may cha
 However, we are attempting to maintain this [tutorial](https://github.com/jbloomAus/SAELens/blob/main/tutorials/training_a_sparse_autoencoder.ipynb)
  [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://githubtocolab.com/jbloomAus/SAELens/blob/main/tutorials/training_a_sparse_autoencoder.ipynb).
 
- We encourage readers to join the [Open Source Mechanistic Interpretability Slack](https://join.slack.com/t/opensourcemechanistic/shared_invite/zt-1qosyh8g3-9bF3gamhLNJiqCL_QqLFrA) for support!
+ We encourage readers to join the [Open Source Mechanistic Interpretability Slack](https://join.slack.com/t/opensourcemechanistic/shared_invite/zt-2k0id7mv8-CsIgPLmmHd03RPJmLUcapw) for support!
 
 ## Basic training setup
 
@@ -152,6 +152,19 @@ cfg = PretokenizeRunnerConfig(
 
 dataset = PretokenizeRunner(cfg).run()
 ```
+
+## List of Pretokenized datasets
+
+Below is a list of pre-tokenized datasets that can be used with SAELens. If you have a dataset you would like to add to this list, please open a PR!
+
+| Huggingface ID | Tokenizer | Source Dataset | context size | Created with SAELens |
+| --- | --- | --- | --- | --- |
+| [chanind/openwebtext-gemma](https://huggingface.co/datasets/chanind/openwebtext-gemma) | gemma | [Skylion007/openwebtext](https://huggingface.co/datasets/Skylion007/openwebtext) | 8192 | [Yes](https://huggingface.co/datasets/chanind/openwebtext-gemma/blob/main/sae_lens.json) |
+| [chanind/openwebtext-llama3](https://huggingface.co/datasets/chanind/openwebtext-llama3) | llama3 | [Skylion007/openwebtext](https://huggingface.co/datasets/Skylion007/openwebtext) | 8192 | [Yes](https://huggingface.co/datasets/chanind/openwebtext-llama3/blob/main/sae_lens.json) |
+| [apollo-research/Skylion007-openwebtext-tokenizer-EleutherAI-gpt-neox-20b](https://huggingface.co/datasets/apollo-research/Skylion007-openwebtext-tokenizer-EleutherAI-gpt-neox-20b) | EleutherAI/gpt-neox-20b | [Skylion007/openwebtext](https://huggingface.co/datasets/Skylion007/openwebtext) | 2048 | [No](https://huggingface.co/datasets/apollo-research/Skylion007-openwebtext-tokenizer-EleutherAI-gpt-neox-20b/blob/main/upload_script.py) |
+| [apollo-research/monology-pile-uncopyrighted-tokenizer-EleutherAI-gpt-neox-20b](https://huggingface.co/datasets/apollo-research/monology-pile-uncopyrighted-tokenizer-EleutherAI-gpt-neox-20b) | EleutherAI/gpt-neox-20b | [monology/pile-uncopyrighted](https://huggingface.co/datasets/monology/pile-uncopyrighted) | 2048 | [No](https://huggingface.co/datasets/apollo-research/monology-pile-uncopyrighted-tokenizer-EleutherAI-gpt-neox-20b/blob/main/upload_script.py) |
+| [apollo-research/monology-pile-uncopyrighted-tokenizer-gpt2](https://huggingface.co/datasets/apollo-research/monology-pile-uncopyrighted-tokenizer-gpt2) | gpt2 | [monology/pile-uncopyrighted](https://huggingface.co/datasets/monology/pile-uncopyrighted) | 1024 | [No](https://huggingface.co/datasets/apollo-research/monology-pile-uncopyrighted-tokenizer-gpt2/blob/main/upload_script.py) |
+| [apollo-research/Skylion007-openwebtext-tokenizer-gpt2](https://huggingface.co/datasets/apollo-research/Skylion007-openwebtext-tokenizer-gpt2) | gpt2 | [Skylion007/openwebtext](https://huggingface.co/datasets/Skylion007/openwebtext) | 1024 | [No](https://huggingface.co/datasets/apollo-research/Skylion007-openwebtext-tokenizer-gpt2/blob/main/upload_script.py) |
 
 ## Caching activations
 

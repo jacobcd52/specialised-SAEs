@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from functools import cache
 from importlib import resources
+from typing import Optional
 
 import yaml
 
@@ -14,6 +15,7 @@ class PretrainedSAELookup:
     saes_map: dict[str, str]  # id -> path
     expected_var_explained: dict[str, float]
     expected_l0: dict[str, float]
+    config_overrides: dict[str, str] | None
 
 
 @cache
@@ -42,5 +44,27 @@ def get_pretrained_saes_directory() -> dict[str, PretrainedSAELookup]:
                 saes_map=saes_map,
                 expected_var_explained=var_explained_map,
                 expected_l0=l0_map,
+                config_overrides=value.get("config_overrides"),
             )
     return directory
+
+
+def get_norm_scaling_factor(release: str, sae_id: str) -> Optional[float]:
+    """
+    Retrieve the norm_scaling_factor for a specific SAE if it exists.
+
+    Args:
+        release (str): The release name of the SAE.
+        sae_id (str): The ID of the specific SAE.
+
+    Returns:
+        Optional[float]: The norm_scaling_factor if it exists, None otherwise.
+    """
+    package = "sae_lens"
+    with resources.open_text(package, "pretrained_saes.yaml") as file:
+        data = yaml.safe_load(file)
+        if release in data["SAE_LOOKUP"]:
+            for sae_info in data["SAE_LOOKUP"][release]["saes"]:
+                if sae_info["id"] == sae_id:
+                    return sae_info.get("norm_scaling_factor")
+    return None

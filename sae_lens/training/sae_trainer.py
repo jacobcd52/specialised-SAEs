@@ -10,7 +10,7 @@ from transformer_lens.hook_points import HookedRootModule
 
 from sae_lens import __version__
 from sae_lens.config import LanguageModelSAERunnerConfig, DTYPE_MAP
-from sae_lens.evals import run_evals
+from sae_lens.evals import EvalConfig, run_evals
 from sae_lens.training.activations_store import ActivationsStore
 from sae_lens.training.optim import L1Scheduler, get_lr_scheduler
 from sae_lens.training.training_sae import TrainingSAE, TrainStepOutput
@@ -131,6 +131,16 @@ class SAETrainer:
         else:
             self.autocast_if_enabled = contextlib.nullcontext()
 
+        # Set up eval config
+
+        self.trainer_eval_config = EvalConfig(
+            batch_size_prompts=self.cfg.eval_batch_size_prompts,
+            n_eval_reconstruction_batches=self.cfg.n_eval_batches,
+            compute_ce_loss=True,
+            n_eval_sparsity_variance_batches=1,
+            compute_l2_norms=True,
+        )
+
     @property
     def feature_sparsity(self) -> torch.Tensor:
         return self.act_freq_scores / self.n_frac_active_tokens
@@ -172,6 +182,11 @@ class SAETrainer:
             ### If n_training_tokens > sae_group.cfg.training_tokens, then we should switch to fine-tuning (if we haven't already)
             self._begin_finetuning_if_needed()
 
+        # fold the estimated norm scaling factor into the sae weights
+        if self.activation_store.estimated_norm_scaling_factor is not None:
+            self.sae.fold_activation_norm_scaling_factor(
+                self.activation_store.estimated_norm_scaling_factor
+            )
 
         # save final sae group to checkpoints folder
         if self.cfg.save_final_checkpoint_locally:
@@ -325,8 +340,7 @@ class SAETrainer:
                 sae=self.sae,
                 activation_store=self.activation_store,
                 model=self.model,
-                n_eval_batches=self.cfg.n_eval_batches,
-                eval_batch_size_prompts=self.cfg.eval_batch_size_prompts,
+                eval_config=self.trainer_eval_config,
                 model_kwargs=self.cfg.model_kwargs,
             )
 
@@ -334,12 +348,12 @@ class SAETrainer:
             eval_metrics["weights/W_dec_norms"] = wandb.Histogram(W_dec_norm_dist)  # type: ignore
 
             if self.sae.cfg.architecture == "standard":
-                b_e_dist = self.sae.b_enc.to(torch.float32).detach().cpu().numpy()
+                b_e_dist = self.sae.b_enc.detach().float().cpu().numpy()
                 eval_metrics["weights/b_e"] = wandb.Histogram(b_e_dist)  # type: ignore
             elif self.sae.cfg.architecture == "gated":
-                b_gate_dist = self.sae.b_gate.to(torch.float32).detach().cpu().numpy()
+                b_gate_dist = self.sae.b_gate.detach().float().cpu().numpy()
                 eval_metrics["weights/b_gate"] = wandb.Histogram(b_gate_dist)  # type: ignore
-                b_mag_dist = self.sae.b_mag.to(torch.float32).detach().cpu().numpy()
+                b_mag_dist = self.sae.b_mag.detach().float().cpu().numpy()
                 eval_metrics["weights/b_mag"] = wandb.Histogram(b_mag_dist)  # type: ignore
 
             wandb.log(

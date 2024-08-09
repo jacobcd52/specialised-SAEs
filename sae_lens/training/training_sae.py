@@ -2,8 +2,9 @@
 https://github.com/ArthurConmy/sae/blob/main/sae/model.py
 """
 
+import json
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 from typing import Any, Optional
 import requests
 
@@ -21,11 +22,17 @@ from typing import Any, Optional, Dict
 
 
 from sae_lens.config import LanguageModelSAERunnerConfig, DTYPE_MAP
+from sae_lens.config import DTYPE_MAP, LanguageModelSAERunnerConfig
 from sae_lens.sae import SAE, SAEConfig
 from sae_lens.toolkit.pretrained_sae_loaders import (
-    load_pretrained_sae_lens_sae_components,
+    handle_config_defaulting,
+    read_sae_from_disk,
 )
 from sae_lens.jacob.load_sae_from_hf import load_sae_from_hf
+
+SPARSITY_PATH = "sparsity.safetensors"
+SAE_WEIGHTS_PATH = "sae_weights.safetensors"
+SAE_CFG_PATH = "cfg.json"
 
 
 @dataclass
@@ -44,8 +51,7 @@ class TrainStepOutput:
     auxiliary_reconstruction_loss: float = 0.0
 
 
-
-@dataclass
+@dataclass(kw_only=True)
 class TrainingSAEConfig(SAEConfig):
     # Sparsity Loss Calculations
     l1_coefficient: float
@@ -94,6 +100,7 @@ class TrainingSAEConfig(SAEConfig):
             hook_layer=cfg.hook_layer,
             hook_head_index=cfg.hook_head_index,
             activation_fn_str=cfg.activation_fn,
+            activation_fn_kwargs=cfg.activation_fn_kwargs,
             apply_b_dec_to_input=cfg.apply_b_dec_to_input,
             finetuning_scaling_factor=cfg.finetuning_method is not None,
             sae_lens_training_version=cfg.sae_lens_training_version,
@@ -112,15 +119,18 @@ class TrainingSAEConfig(SAEConfig):
             init_encoder_as_decoder_transpose=cfg.init_encoder_as_decoder_transpose,
             scale_sparsity_penalty_by_decoder_norm=cfg.scale_sparsity_penalty_by_decoder_norm,
             normalize_activations=cfg.normalize_activations,
-            dataset_trust_remote_code=cfg.dataset_trust_remote_code
-
+            dataset_trust_remote_code=cfg.dataset_trust_remote_code,
         )
 
     @classmethod
-    def from_dict(cls, config_dict: Dict[str, Any]) -> "TrainingSAEConfig":
-        field_names = {f.name for f in fields(cls)}
-        filtered_dict = {k: v for k, v in config_dict.items() if k in field_names}
-        return cls(**filtered_dict)
+    def from_dict(cls, config_dict: dict[str, Any]) -> "TrainingSAEConfig":
+        # remove any keys that are not in the dataclass
+        # since we sometimes enhance the config with the whole LM runner config
+        valid_field_names = {field.name for field in fields(cls)}
+        valid_config_dict = {
+            key: val for key, val in config_dict.items() if key in valid_field_names
+        }
+        return TrainingSAEConfig(**valid_config_dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -146,6 +156,7 @@ class TrainingSAEConfig(SAEConfig):
             "d_in": self.d_in,
             "d_sae": self.d_sae,
             "activation_fn_str": self.activation_fn_str,
+            "activation_fn_kwargs": self.activation_fn_kwargs,
             "apply_b_dec_to_input": self.apply_b_dec_to_input,
             "dtype": self.dtype,
             "model_name": self.model_name,
@@ -252,7 +263,7 @@ class TrainingSAE(SAE):
             ), "Gated SAEs do not support ghost grads"
             assert self.use_error_term is False, "Gated SAEs do not support error terms"
 
-    def encode(
+    def encode_standard(
         self, x: Float[torch.Tensor, "... d_in"]
     ) -> Float[torch.Tensor, "... d_sae"]:
         """
@@ -265,14 +276,14 @@ class TrainingSAE(SAE):
         self, x: Float[torch.Tensor, "... d_in"]
     ) -> tuple[Float[torch.Tensor, "... d_sae"], Float[torch.Tensor, "... d_sae"]]:
 
-        # move x to correct dtype
         x = x.to(self.dtype)
-        # handle hook z reshaping if needed.
         x = self.reshape_fn_in(x)  # type: ignore
-        # apply b_dec_to_input if using that method.
-        sae_in = self.hook_sae_input(x - (self.b_dec * self.cfg.apply_b_dec_to_input))
-        # handle run time activation normalization if needed
+        x = self.hook_sae_input(x)
         x = self.run_time_activation_norm_fn_in(x)
+
+        # apply b_dec_to_input if using that method.
+        sae_in = x - (self.b_dec * self.cfg.apply_b_dec_to_input)
+
         # "... d_in, d_in d_sae -> ... d_sae",
         hidden_pre = self.hook_sae_acts_pre(sae_in @ self.W_enc + self.b_enc)
         hidden_pre_noised = hidden_pre + (
@@ -284,14 +295,15 @@ class TrainingSAE(SAE):
     def encode_with_hidden_pre_gated(
         self, x: Float[torch.Tensor, "... d_in"]
     ) -> tuple[Float[torch.Tensor, "... d_sae"], Float[torch.Tensor, "... d_sae"]]:
-        # move x to correct dtype
-        x = x.to(self.dtype)
 
-        # handle hook z reshaping if needed.
+        x = x.to(self.dtype)
         x = self.reshape_fn_in(x)  # type: ignore
-        
+        x = self.hook_sae_input(x)
+        x = self.run_time_activation_norm_fn_in(x)
+
         # apply b_dec_to_input if using that method.
-        sae_in = self.hook_sae_input(x - (self.b_dec * self.cfg.apply_b_dec_to_input))
+        sae_in = x - (self.b_dec * self.cfg.apply_b_dec_to_input)
+
         # Gating path with Heaviside step function
         gating_pre_activation = sae_in @ self.W_enc + self.b_gate
         active_features = (gating_pre_activation > 0).to(self.dtype)
@@ -497,16 +509,25 @@ class TrainingSAE(SAE):
         cls,
         path: str,
         device: str = "cpu",
-        dtype: str = "float32",
+        dtype: str | None = None,
     ) -> "TrainingSAE":
 
-        config_path = os.path.join(path, "cfg.json")
-        weight_path = os.path.join(path, "sae_weights.safetensors")
+        # get the config
+        config_path = os.path.join(path, SAE_CFG_PATH)
+        with open(config_path, "r") as f:
+            cfg_dict = json.load(f)
+        cfg_dict = handle_config_defaulting(cfg_dict)
+        cfg_dict["device"] = device
+        if dtype is not None:
+            cfg_dict["dtype"] = dtype
 
-        cfg_dict, state_dict, _ = load_pretrained_sae_lens_sae_components(
-            config_path, weight_path, device, dtype
+        weight_path = os.path.join(path, SAE_WEIGHTS_PATH)
+        cfg_dict, state_dict = read_sae_from_disk(
+            cfg_dict=cfg_dict,
+            weight_path=weight_path,
+            device=device,
+            dtype=DTYPE_MAP[cfg_dict["dtype"]],
         )
-
         sae_cfg = TrainingSAEConfig.from_dict(cfg_dict)
 
         sae = cls(sae_cfg)
@@ -527,9 +548,6 @@ class TrainingSAE(SAE):
                 )
             )
             self.initialize_decoder_norm_constant_norm()
-
-        elif self.cfg.normalize_sae_decoder:
-            self.set_decoder_norm_to_unit_norm()
 
         # Then we initialize the encoder weights (either as the transpose of decoder or not)
         if self.cfg.init_encoder_as_decoder_transpose:

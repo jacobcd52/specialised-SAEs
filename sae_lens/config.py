@@ -5,6 +5,7 @@ from typing import Any, Literal, Optional, cast
 
 import torch
 import wandb
+from datasets import Dataset, DatasetDict, IterableDataset, IterableDatasetDict
 
 from sae_lens import __version__
 
@@ -18,6 +19,8 @@ DTYPE_MAP = {
     "torch.float16": torch.float16,
     "torch.bfloat16": torch.bfloat16,
 }
+
+HfDataset = DatasetDict | Dataset | IterableDatasetDict | IterableDataset
 
 
 @dataclass
@@ -131,7 +134,7 @@ class LanguageModelSAERunnerConfig:
     hook_eval: str = "NOT_IN_USE"
     hook_layer: int = 0
     hook_head_index: Optional[int] = None
-    dataset_path: str = "NeelNanda/c4-tokenized-2b"
+    dataset_path: str = ""
     dataset_trust_remote_code: bool = True
     streaming: bool = True
     is_dataset_tokenized: bool = True
@@ -146,8 +149,9 @@ class LanguageModelSAERunnerConfig:
     d_in: int = 512
     d_sae: Optional[int] = None
     b_dec_init_method: str = "geometric_median"
+    activation_fn: str = "relu"  # relu, tanh-relu, topk
+    activation_fn_kwargs: dict[str, Any] = field(default_factory=dict)  # for topk
     expansion_factor: float | int = 4
-    activation_fn: str = "relu"  # relu, tanh-relu
     normalize_sae_decoder: bool = True
     noise_scale: float = 0.0
     from_pretrained_path: Optional[str] = None
@@ -292,6 +296,7 @@ class LanguageModelSAERunnerConfig:
             "none",
             "expected_average_only_in",
             "constant_norm_rescale",
+            "layer_norm",
         ]:
             raise ValueError(
                 f"normalize_activations must be none, expected_average_only_in, or constant_norm_rescale. Got {self.normalize_activations}"
@@ -387,6 +392,7 @@ class LanguageModelSAERunnerConfig:
             "finetuning_scaling_factor": self.finetuning_method is not None,
             "sae_lens_training_version": self.sae_lens_training_version,
             "normalize_activations": self.normalize_activations,
+            "activation_fn_kwargs": self.activation_fn_kwargs,
         }
 
     def get_training_sae_cfg_dict(self) -> dict[str, Any]:
@@ -452,7 +458,7 @@ class CacheActivationsRunnerConfig:
     hook_name: str = "blocks.{layer}.hook_mlp_out"
     hook_layer: int = 0
     hook_head_index: Optional[int] = None
-    dataset_path: str = "NeelNanda/c4-tokenized-2b"
+    dataset_path: str = ""
     dataset_trust_remote_code: bool | None = None
     streaming: bool = True
     is_dataset_tokenized: bool = True
@@ -591,7 +597,7 @@ def _default_cached_activations_path(
 @dataclass
 class PretokenizeRunnerConfig:
     tokenizer_name: str = "gpt2"
-    dataset_path: str = "NeelNanda/c4-10k"
+    dataset_path: str = ""
     dataset_trust_remote_code: bool | None = None
     split: str | None = "train"
     data_files: list[str] | None = None
@@ -602,11 +608,12 @@ class PretokenizeRunnerConfig:
     shuffle: bool = True
     seed: int | None = None
     streaming: bool = False
+    pretokenize_batch_size: int | None = 1000
 
     # special tokens
     begin_batch_token: int | Literal["bos", "eos", "sep"] | None = "bos"
     begin_sequence_token: int | Literal["bos", "eos", "sep"] | None = None
-    sequence_separator_token: int | Literal["bos", "eos", "sep"] | None = "eos"
+    sequence_separator_token: int | Literal["bos", "eos", "sep"] | None = "bos"
 
     # if saving locally, set save_path
     save_path: str | None = None

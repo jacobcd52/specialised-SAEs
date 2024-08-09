@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "sae-lens"
-version = "3.7.0"
+version = "3.14.0"
 description = "Training and Analyzing Sparse Autoencoders (SAEs)"
 authors = ["Joseph Bloom"]
 readme = "README.md"
@@ -9,7 +9,7 @@ include = ["pretrained_saes.yaml"]
 
 [tool.poetry.dependencies]
 python = "^3.10"
-transformer-lens = "^1.14.0"
+transformer-lens = "^2.0.0"
 transformers = "^4.38.1"
 plotly = "^5.19.0"
 plotly-express = "^0.4.1"
@@ -18,16 +18,16 @@ matplotlib-inline = "^0.1.6"
 datasets = "^2.17.1"
 babe = "^0.0.7"
 nltk = "^3.8.1"
-sae-vis = "^0.2.18"
 safetensors = "^0.4.2"
 typer = "^0.12.3"
 mamba-lens = { version = "^0.0.4", optional = true }
 pyzmq = "26.0.0"
-automated-interpretability = "^0.0.3"
+automated-interpretability = ">=0.0.5,<1.0.0"
 python-dotenv = "^1.0.1"
 pyyaml = "^6.0.1"
 pytest-profiling = "^1.7.0"
 zstandard = "^0.22.0"
+typing-extensions = "^4.10.0"
 
 
 [tool.poetry.group.dev.dependencies]
@@ -49,6 +49,7 @@ mkdocs-autorefs = "^1.0.1"
 mkdocs-section-index = "^0.3.8"
 mkdocstrings = "^0.24.1"
 mkdocstrings-python = "^1.9.0"
+tabulate = "^0.9.0"
 
 [tool.poetry.extras]
 mamba = ["mamba-lens"]
@@ -71,6 +72,7 @@ reportConstantRedefinition = "none"
 reportUnknownLambdaType = "none"
 reportPrivateUsage = "none"
 reportDeprecated = "none"
+reportPrivateImportUsage = "none"
 ignore = [
     "**/wandb/**"
 ]

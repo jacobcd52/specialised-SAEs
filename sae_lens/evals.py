@@ -1,12 +1,56 @@
+import argparse
+import re
+from dataclasses import dataclass
 from functools import partial
-from typing import Any, Mapping, cast
+from typing import Any, Mapping
 
+import einops
 import pandas as pd
 import torch
+from tqdm import tqdm
+from transformer_lens import HookedTransformer
 from transformer_lens.hook_points import HookedRootModule
 
 from sae_lens.sae import SAE
+from sae_lens.toolkit.pretrained_saes_directory import get_pretrained_saes_directory
 from sae_lens.training.activations_store import ActivationsStore
+
+
+# Everything by default is false so the user can just set the ones they want to true
+@dataclass
+class EvalConfig:
+    batch_size_prompts: int | None = None
+
+    # Reconstruction metrics
+    n_eval_reconstruction_batches: int = 10
+    compute_kl: bool = False
+    compute_ce_loss: bool = False
+
+    # Sparsity and variance metrics
+    n_eval_sparsity_variance_batches: int = 1
+    compute_l2_norms: bool = False
+    compute_sparsity_metrics: bool = False
+    compute_variance_metrics: bool = False
+
+
+def get_eval_everything_config(
+    batch_size_prompts: int | None = None,
+    n_eval_reconstruction_batches: int = 10,
+    n_eval_sparsity_variance_batches: int = 1,
+) -> EvalConfig:
+    """
+    Returns an EvalConfig object with all metrics set to True, so that when passed to run_evals all available metrics will be run.
+    """
+    return EvalConfig(
+        batch_size_prompts=batch_size_prompts,
+        n_eval_reconstruction_batches=n_eval_reconstruction_batches,
+        compute_kl=True,
+        compute_ce_loss=True,
+        compute_l2_norms=True,
+        n_eval_sparsity_variance_batches=n_eval_sparsity_variance_batches,
+        compute_sparsity_metrics=True,
+        compute_variance_metrics=True,
+    )
 
 
 @torch.no_grad()
@@ -14,10 +58,9 @@ def run_evals(
     sae: SAE,
     activation_store: ActivationsStore,
     model: HookedRootModule,
-    n_eval_batches: int = 10,
-    eval_batch_size_prompts: int | None = None,
+    eval_config: EvalConfig = EvalConfig(),
     model_kwargs: Mapping[str, Any] = {},
-) -> Mapping[str, Any]:
+) -> dict[str, Any]:
 
     hook_name = sae.cfg.hook_name
     hook_head_index = sae.cfg.hook_head_index
@@ -136,8 +179,10 @@ def get_recons_loss(
     model: HookedRootModule,
     batch_tokens: torch.Tensor,
     activation_store: ActivationsStore,
+    compute_kl: bool,
+    compute_ce_loss: bool,
     model_kwargs: Mapping[str, Any] = {},
-):
+) -> dict[str, Any]:
     hook_name = sae.cfg.hook_name
     head_index = sae.cfg.hook_head_index
 
@@ -200,6 +245,7 @@ def get_recons_loss(
             activations = activation_store.apply_norm_scaling_factor(activations)
 
         new_activations = sae.decode(sae.encode(activations[:, :, head_index])).to(
+        new_activations = sae.decode(sae.encode(activations[:, :, head_index])).to(
             activations.dtype
         )
         activations[:, :, head_index] = new_activations
@@ -209,7 +255,7 @@ def get_recons_loss(
             activations = activation_store.unscale(activations)
         return activations.to(original_device)
 
-    def zero_ablate_hook(activations: torch.Tensor, hook: Any):
+    def standard_zero_ablate_hook(activations: torch.Tensor, hook: Any):
         original_device = activations.device
         activations = activations.to(sae.device)
 
@@ -227,15 +273,18 @@ def get_recons_loss(
     if any(substring in hook_name for substring in has_head_dim_key_substrings):
         if head_index is None:
             replacement_hook = all_head_replacement_hook
+            zero_ablate_hook = standard_zero_ablate_hook
         else:
             replacement_hook = single_head_replacement_hook
+            zero_ablate_hook = single_head_zero_ablate_hook
     else:
         replacement_hook = standard_replacement_hook
+        zero_ablate_hook = standard_zero_ablate_hook
 
     model.reset_hooks()
     recons_loss = model.run_with_hooks(
         batch_tokens,
-        return_type="loss",
+        return_type="both",
         fwd_hooks=[(hook_name, partial(replacement_hook))],
         **model_kwargs,
     )
@@ -243,7 +292,7 @@ def get_recons_loss(
     model.reset_hooks()
     zero_abl_loss = model.run_with_hooks(
         batch_tokens,
-        return_type="loss",
+        return_type="both",
         fwd_hooks=[(hook_name, zero_ablate_hook)],
         **model_kwargs,
     )
