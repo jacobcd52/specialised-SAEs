@@ -9,7 +9,7 @@ import pandas as pd
 from typing import Optional
 import plotly.express as px
 
-from less.jacob.load_sae_from_hf import load_sae_from_hf
+from sae_lens.jacob.load_sae_from_hf import load_sae_from_hf
 from sae_lens.config import DTYPE_MAP
 
 torch.set_grad_enabled(False)
