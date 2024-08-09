@@ -2,7 +2,7 @@ import argparse
 import re
 from dataclasses import dataclass
 from functools import partial
-from typing import Any, Mapping
+from typing import Any, Mapping, cast
 
 import einops
 import pandas as pd
@@ -79,8 +79,8 @@ def run_evals(
         sae,
         model,
         activation_store,
-        n_batches=n_eval_batches,
-        eval_batch_size_prompts=eval_batch_size_prompts,
+        n_batches=eval_config.n_eval_reconstruction_batches,
+        eval_batch_size_prompts=eval_config.batch_size_prompts,
     )
 
     main_loss = losses_df["main_loss"].mean()
@@ -179,10 +179,8 @@ def get_recons_loss(
     model: HookedRootModule,
     batch_tokens: torch.Tensor,
     activation_store: ActivationsStore,
-    compute_kl: bool,
-    compute_ce_loss: bool,
     model_kwargs: Mapping[str, Any] = {},
-) -> dict[str, Any]:
+):
     hook_name = sae.cfg.hook_name
     head_index = sae.cfg.hook_head_index
 
@@ -245,7 +243,6 @@ def get_recons_loss(
             activations = activation_store.apply_norm_scaling_factor(activations)
 
         new_activations = sae.decode(sae.encode(activations[:, :, head_index])).to(
-        new_activations = sae.decode(sae.encode(activations[:, :, head_index])).to(
             activations.dtype
         )
         activations[:, :, head_index] = new_activations
@@ -255,7 +252,7 @@ def get_recons_loss(
             activations = activation_store.unscale(activations)
         return activations.to(original_device)
 
-    def standard_zero_ablate_hook(activations: torch.Tensor, hook: Any):
+    def zero_ablate_hook(activations: torch.Tensor, hook: Any):
         original_device = activations.device
         activations = activations.to(sae.device)
 
@@ -273,18 +270,15 @@ def get_recons_loss(
     if any(substring in hook_name for substring in has_head_dim_key_substrings):
         if head_index is None:
             replacement_hook = all_head_replacement_hook
-            zero_ablate_hook = standard_zero_ablate_hook
         else:
             replacement_hook = single_head_replacement_hook
-            zero_ablate_hook = single_head_zero_ablate_hook
     else:
         replacement_hook = standard_replacement_hook
-        zero_ablate_hook = standard_zero_ablate_hook
 
     model.reset_hooks()
     recons_loss = model.run_with_hooks(
         batch_tokens,
-        return_type="both",
+        return_type="loss",
         fwd_hooks=[(hook_name, partial(replacement_hook))],
         **model_kwargs,
     )
@@ -292,7 +286,7 @@ def get_recons_loss(
     model.reset_hooks()
     zero_abl_loss = model.run_with_hooks(
         batch_tokens,
-        return_type="both",
+        return_type="loss",
         fwd_hooks=[(hook_name, zero_ablate_hook)],
         **model_kwargs,
     )

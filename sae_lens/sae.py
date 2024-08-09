@@ -631,6 +631,7 @@ class SAE(HookedRootModule):
         release: str,
         sae_id: str,
         device: str = "cpu",
+        dtype: str = "float32"
     ) -> Tuple["SAE", dict[str, Any], Optional[torch.Tensor]]:
         """
 
@@ -675,7 +676,10 @@ class SAE(HookedRootModule):
         )
 
         sae = cls(SAEConfig.from_dict(cfg_dict))
+        print("load state dict dtype", dtype)
         sae.load_state_dict(state_dict)
+        sae = sae.to(dtype=DTYPE_MAP[dtype])
+        print("loaded sae from state dict, dtype", sae.W_dec.dtype)
 
         # Check if normalization is 'expected_average_only_in'
         if cfg_dict.get("normalize_activations") == "expected_average_only_in":

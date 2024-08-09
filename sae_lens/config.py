@@ -33,6 +33,8 @@ class LanguageModelSAERunnerConfig:
         gsae_repo (str) : Huggingface repo containing GSAE weights
         gsae_filename (str) : name of .safetensors file containing GSAE weights
         gsae_cfg_filename (str) : name of .json gile containing config
+        gsae_release (str) : alternate way to specify GSAE path, using SAELens preconfigured releases (useful for gemma scope)
+        gsae_id (str) : alternate way to specify GSAE path, using SAELens preconfigured releases
         control_dataset_path (str): Huggingface repo name containing an unstructured dataset used as a control. E.g. "NeelNanda/openwebtext-tokenized-9b
         is_control_dataset_tokenized (bool): self-explanatory
         control_mixture (float): The fraction of each batch of activations fed to the SAE which came from the control dataset.
@@ -122,10 +124,15 @@ class LanguageModelSAERunnerConfig:
     gsae_repo : Optional[str] = None
     gsae_filename : Optional[str] = None
     gsae_cfg_filename : Optional[str] = None
+
+    gsae_release : Optional[str] = None
+    gsae_id : Optional[str] = None
+    
     control_dataset_path : Optional[str] = None
     is_control_dataset_tokenized : bool = True
     control_mixture : float = 0.01
     save_final_checkpoint_locally : bool = True
+
 
     # Data Generating Function (Model + Training Distibuion)
     model_name: str = "gelu-2l"
@@ -413,6 +420,8 @@ class LanguageModelSAERunnerConfig:
             "gsae_repo" : self.gsae_repo,
             "gsae_filename" : self.gsae_filename,
             "gsae_cfg_filename" : self.gsae_cfg_filename,
+            "gsae_release" : self.gsae_release,
+            "gsae_id" : self.gsae_id,
             "control_dataset_path" : self.control_dataset_path,
             "is_control_dataset_tokenized" : self.is_control_dataset_tokenized,
             "control_mixture" : self.control_mixture,

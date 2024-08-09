@@ -69,6 +69,8 @@ class TrainingSAEConfig(SAEConfig):
     gsae_repo : Optional[str] = None
     gsae_filename : Optional[str] = None
     gsae_cfg_filename : Optional[str] = None
+    gsae_release : Optional[str] = None
+    gsae_id : Optional[str] = None
     control_dataset_path : Optional[str] = None
     control_mixture : float = 0.0
     is_control_dataset_tokenized : bool = True
@@ -84,6 +86,8 @@ class TrainingSAEConfig(SAEConfig):
             gsae_repo = cfg.gsae_repo,
             gsae_filename = cfg.gsae_filename,
             gsae_cfg_filename = cfg.gsae_cfg_filename,
+            gsae_release = cfg.gsae_release,
+            gsae_id = cfg.gsae_id,
             control_dataset_path = cfg.control_dataset_path,
             control_mixture=cfg.control_mixture,
             is_control_dataset_tokenized = cfg.is_control_dataset_tokenized,
@@ -176,6 +180,8 @@ class TrainingSAEConfig(SAEConfig):
             "gsae_repo" : self.gsae_repo,
             "gsae_filename" : self.gsae_filename,
             "gsae_cfg_filename" : self.gsae_cfg_filename,
+            "gsae_release" : self.gsae_release,
+            "gsae_id" : self.gsae_id,
             "control_dataset_path" : self.control_dataset_path,
             "control_mixture" : self.control_mixture,
             "is_control_dataset_tokenized" : self.is_control_dataset_tokenized,
@@ -234,23 +240,29 @@ class TrainingSAE(SAE):
                                          self.cfg.gsae_cfg_filename, 
                                          device=self.cfg.device,
                                          dtype=self.cfg.dtype)
-            if self.gsae:
-                for param in self.gsae.parameters():
-                    param.requires_grad = False
-                print()
-                print("gsae loaded")
-                print()
-                assert(self.gsae.use_error_term == False)
-                assert self.gsae.cfg.hook_name == self.cfg.hook_name, f"hook_name mismatch: {self.gsae.cfg.hook_name} vs {self.cfg.hook_name}"
-                assert self.gsae.cfg.model_name == self.cfg.model_name, f"model_name mismatch: {self.gsae.cfg.model_name} vs {self.cfg.model_name}"
-            else:
-                print()
-                print("no gsae loaded")
-                print()
+    
+        elif self.cfg.gsae_release:
+            self.gsae, _, _ = SAE.from_pretrained(
+                release = self.cfg.gsae_release,
+                sae_id = self.cfg.gsae_id, # won't always be a hook point
+                device = self.cfg.device,
+                dtype=self.cfg.dtype
+            )
 
-
-
-        
+        if self.gsae:
+            for param in self.gsae.parameters():
+                param.requires_grad = False
+            print()
+            print("self.cfg.dtype", self.cfg.dtype)
+            print("gsae loaded, dtype", self.gsae.W_dec.dtype)
+            print()
+            assert(self.gsae.use_error_term == False)
+            assert self.gsae.cfg.hook_name == self.cfg.hook_name, f"hook_name mismatch: {self.gsae.cfg.hook_name} vs {self.cfg.hook_name}"
+            assert self.gsae.cfg.model_name == self.cfg.model_name, f"model_name mismatch: {self.gsae.cfg.model_name} vs {self.cfg.model_name}"
+        else:
+            print()
+            print("no gsae loaded")
+            print()    
 
     @classmethod
     def from_dict(cls, config_dict: dict[str, Any]) -> "TrainingSAE":

@@ -39,8 +39,8 @@ lr_decay_steps = total_training_steps // 5  # 20% of training
 l1_warm_up_steps = total_training_steps // 20  # 5% of training
 
 expansion_factor=2
-model_name = "gemma-2b-it"
-hook_name = "blocks.12.hook_resid_pre"
+model_name = "gemma-2-2b"
+hook_name = "blocks.12.hook_resid_post"
 subject = "hs_phys"
 
 control_mixture = 0
@@ -53,9 +53,11 @@ for lr in [1e-3]:
             # JACOB
             model_from_pretrained_kwargs = {"dtype" : "bfloat16"},
             b_dec_init_method="mean",
-            gsae_repo = 'jacobcd52/gemma2-gsae',
-            gsae_filename = 'sae_weights.safetensors',
-            gsae_cfg_filename = 'cfg.json',
+            # gsae_repo = 'jacobcd52/gemma2-gsae',
+            # gsae_filename = 'sae_weights.safetensors',
+            # gsae_cfg_filename = 'cfg.json',
+            gsae_release = 'gemma-scope-2b-pt-res',
+            gsae_id = 'layer_12/width_16k/average_l0_41',
             
             apply_b_dec_to_input=True,  # We won't apply the decoder weights to the input.
 
@@ -76,7 +78,7 @@ for lr in [1e-3]:
             model_name=model_name,  # our model (more options here: https://neelnanda-io.github.io/TransformerLens/generated/model_properties_table.html)
             hook_name=hook_name,  # A valid hook point (see more details here: https://neelnanda-io.github.io/TransformerLens/generated/demos/Main_Demo.html#Hook-Points)
             hook_layer=12,  # Only one layer in the model.
-            d_in=2048,  # the width of the mlp output.
+            d_in=2304,  # the width of the mlp output.
             streaming=True,  # we could pre-download the token dataset if it was small.
             # SAE Parameters
             mse_loss_normalization=None,  # We won't normalize the mse loss,

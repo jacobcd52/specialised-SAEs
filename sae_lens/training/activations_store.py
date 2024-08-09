@@ -463,25 +463,38 @@ class ActivationsStore:
             self._dataloader = self.get_data_loader()
         return self._dataloader
 
-    def get_batch_tokens(
-        self, batch_size: int | None = None, raise_at_epoch_end: bool = False
-    ):
+    def get_batch_tokens(self, batch_size: int | None = None):
         """
         Streams a batch of tokens from the main dataset.
         """
         if not batch_size:
             batch_size = self.store_batch_size_prompts
-        sequences = []
-        # the sequences iterator yields fully formed tokens of size context_size, so we just need to cat these into a batch
-        for _ in range(batch_size):
-            try:
-                sequences.append(next(self.iterable_sequences))
-            except StopIteration:
-                self.iterable_sequences = self._iterate_tokenized_sequences()
-                if raise_at_epoch_end:
-                    raise StopIteration(
-                        f"Ran out of tokens in dataset after {self.n_dataset_processed} samples, beginning the next epoch."
-                    )
+        context_size = self.context_size
+        device = self.device
+
+        batch_tokens = torch.zeros(
+            size=(0, context_size), device=device, dtype=torch.long, requires_grad=False
+        )
+
+        current_batch = []
+        current_length = 0
+
+        while batch_tokens.shape[0] < batch_size:
+            tokens = self._get_next_dataset_tokens()
+            token_len = tokens.shape[0]
+
+            # TODO: Fix this so that we are limiting how many tokens we get from the same context.
+            assert self.model.tokenizer is not None  # keep pyright happy
+            while token_len > 0 and batch_tokens.shape[0] < batch_size:
+                # Space left in the current batch
+                space_left = context_size - current_length
+
+                # If the current tokens fit entirely into the remaining space
+                if token_len <= space_left:
+                    current_batch.append(tokens[:token_len])
+                    current_length += token_len
+                    break
+
                 else:
                     # Take as much as will fit
                     current_batch.append(tokens[:space_left])
