@@ -8,46 +8,37 @@ import logging
 logger = logging.getLogger()
 logger.setLevel(logging.ERROR)
 import torch
-
 from huggingface_hub import login, HfApi
 login(token="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")
 api = HfApi()
 
 
-# percent of params that are SSAE = (ssae_expansion/4) / (n_layers)
-# percent of params that are GSAE = (gsae_expansion/4) / (n_layers)
+dead_feature_window = 100_000
+total_training_steps = 2_000
+batch_size = 4096
 
-# SSAE
-# in units of model FPs, a training step requires following compute:
-# 1 + 1*(percent_gsae) + 2*(percent_ssae) = 1 + (2*ssae_expansion + gsae_expansion)/(4*n_layers)
-
-# GSAE-finetune
-# training step compute:
-# 1 + 2*(percent_gsae) = 1 + gsae_expansion/(2*n_layers)
-
-
-# so GSAE_compute = SSAE_compute + gsae_expansion/(2*n_layers)
-
-
-
-total_training_steps = 10_000
-batch_size = 4096*2
 total_training_tokens = total_training_steps * batch_size
-
 lr_warm_up_steps = 0
 lr_decay_steps = total_training_steps // 5  # 20% of training
 l1_warm_up_steps = total_training_steps // 20  # 5% of training
 
 expansion_factor=2
 model_name = "gemma-2-2b"
-hook_name = "blocks.12.hook_resid_post"
-subject = "hs_phys"
+# layer = 7
+# gsae_id = "layer_7/width_16k/average_l0_20"
+# gsae_width = "16k"
 
 control_mixture = 0
+lr = 1e-3
 
-for lr in [1e-3]:
-    for l1_coefficient in [10]:
-        run_name = f"{subject}_l1={l1_coefficient}_expansion={expansion_factor}_tokens={batch_size*total_training_steps}"
+for (layer, gsae_id, gsae_width, l1_coefficient) in [
+                                                    # (7, "layer_7/width_16k/average_l0_20", "16k", 150),
+                                                     (13, "layer_13/width_65k/average_l0_74", "65k", 300)
+                                                     ]:
+    for subject in ["hs_bio_cleaned", "hs_phys_cleaned", "hs_math_cleaned", "college_bio_cleaned", "college_phys_cleaned", "college_math_cleaned", "econ_cleaned", "history_cleaned"]:
+
+        hook_name = f"blocks.{layer}.hook_resid_post"
+        run_name = f"{model_name}_layer{layer}_{subject}_l1={l1_coefficient}_expansion={expansion_factor}_tokens={batch_size*total_training_steps}_gsaewidth={gsae_width}"
     
         cfg = LanguageModelSAERunnerConfig(
             # JACOB
@@ -57,7 +48,7 @@ for lr in [1e-3]:
             # gsae_filename = 'sae_weights.safetensors',
             # gsae_cfg_filename = 'cfg.json',
             gsae_release = 'gemma-scope-2b-pt-res',
-            gsae_id = 'layer_12/width_16k/average_l0_41',
+            gsae_id = gsae_id,
             
             apply_b_dec_to_input=True,  # We won't apply the decoder weights to the input.
 
@@ -69,15 +60,15 @@ for lr in [1e-3]:
             dtype="bfloat16",
             dataset_path=f'jacobcd52/{subject}',
             is_dataset_tokenized=False,
-            wandb_project=f"{model_name}-ssae-{subject}",
-            context_size=128,
+            wandb_project=f"{model_name}-layer{layer}-ssae",
+            context_size=256,
             # from_pretrained_path="/root/specialised-SAEs/sae_lens/jacob/temp_sae",
 
             # Data Generating Function (Model + Training Distribution)
-            architecture="standard",  # we'll use the gated variant.
+            architecture="gated",  # we'll use the gated variant.
             model_name=model_name,  # our model (more options here: https://neelnanda-io.github.io/TransformerLens/generated/model_properties_table.html)
             hook_name=hook_name,  # A valid hook point (see more details here: https://neelnanda-io.github.io/TransformerLens/generated/demos/Main_Demo.html#Hook-Points)
-            hook_layer=12,  # Only one layer in the model.
+            hook_layer=layer,  # Only one layer in the model.
             d_in=2304,  # the width of the mlp output.
             streaming=True,  # we could pre-download the token dataset if it was small.
             # SAE Parameters
@@ -105,8 +96,8 @@ for lr in [1e-3]:
             # Resampling protocol
             use_ghost_grads=False,  # we don't use ghost grads anymore.
             feature_sampling_window=1000,  # this controls our reporting of feature sparsity stats
-            dead_feature_window=1000,  # would effect resampling or ghost grads if we were using it.
-            dead_feature_threshold=1e-4,  # would effect resampling or ghost grads if we were using it.
+            dead_feature_window=dead_feature_window,  # would effect resampling or ghost grads if we were using it.
+            dead_feature_threshold=1e-8,  # would effect resampling or ghost grads if we were using it.
             # WANDB
             log_to_wandb=True,  # always use wandb unless you are just testing code.
             run_name = run_name,
@@ -139,17 +130,31 @@ for lr in [1e-3]:
             if cfg.control_mixture > 0:
                 name += f"_control_mix={cfg.control_mixture}"
 
-            # Upload the files to a new repository
-            api.upload_file(
-                path_or_fileobj=cfg_path,
-                path_in_repo = name + "_cfg.json",
-                repo_id=f"jacobcd52/{model_name}-ssae-{subject}"
-            )
+            # Define the repository ID
+            repo_id = f"jacobcd52/{model_name}-ssae-{subject}"
 
-            api.upload_file(
-                path_or_fileobj=sae_path,
-                path_in_repo = name + ".safetensors",
-                repo_id=f"jacobcd52/{model_name}-ssae-{subject}"
-            )
+            # Try to create the repository if it doesn't exist
+            try:
+                api.create_repo(repo_id=repo_id, private=False, exist_ok=True)
+            except Exception as e:
+                print(f"An error occurred while creating the repository: {e}")
+                # You might want to handle this error more gracefully
+
+            # Upload the files to the repository
+            try:
+                api.upload_file(
+                    path_or_fileobj=cfg_path,
+                    path_in_repo=f"{name}_cfg.json",
+                    repo_id=repo_id
+                )
+
+                api.upload_file(
+                    path_or_fileobj=sae_path,
+                    path_in_repo=f"{name}.safetensors",
+                    repo_id=repo_id
+                )
+                print("Files uploaded successfully.")
+            except Exception as e:
+                print(f"An error occurred while uploading the files: {e}")
         else:
             print("saving failed - no final checkpoint found!")

@@ -6,11 +6,12 @@ import gc
 import torch
 from tqdm import tqdm
 import pandas as pd
-from typing import Optional
+from typing import Optional, Tuple
 import plotly.express as px
 
 from sae_lens.jacob.load_sae_from_hf import load_sae_from_hf
 from sae_lens.config import DTYPE_MAP
+
 
 torch.set_grad_enabled(False)
 
@@ -18,6 +19,8 @@ torch.set_grad_enabled(False)
 
 # Data loading functions
 NUM_TO_STR = {0: "A", 1: "B", 2: "C", 3: "D"}
+STR_TO_NUM = {"A": 0, "B": 1, "C": 2, "D": 3}
+
 def format_prompt(question, choices):
     formatted_choices = "\n".join([f"{NUM_TO_STR[i]}. {choice}" for i, choice in enumerate(choices)])
     prompt = f"<start_of_turn>user\nQuestion:\n{question}\n\nChoices:\n{formatted_choices}\n<end_of_turn>\n"
@@ -60,28 +63,18 @@ def prepare_dataset(data: Dataset, num_shots=5):
     
     return formatted_prompts, correct_answers
 
-def str_to_num(answer_str):
-    if answer_str == "A" or answer_str == "a" or answer_str == " A" or answer_str == " a":
-        return 0
-    elif answer_str == "B" or answer_str == "b" or answer_str == " B" or answer_str == " b":
-        return 1
-    elif answer_str == "C"  or answer_str == "c" or answer_str == " C" or answer_str == " c":
-        return 2
-    elif answer_str == "D" or answer_str == "d" or answer_str == " D" or answer_str == " d":
-        return 3
-    else: # model did not predict any of the choices
-        return 'invalid_answer'
-
-
 # Evaluation functions
 def get_mmlu_accuracy(model : HookedTransformer, 
                       sae_list : Optional[list] = None,
                       subject : str = "high_school_physics",
-                      ):
+                      ) -> Tuple[float, float]:
     '''
     model (HookedTransformer): the model to evaluate
     sae_list (list): list of SAEs whose sum we patch into the model. If None, the model is evaluated without patching.
     subject (str): name of the subject-specific MMLU dataset, e.g. "abstract_algebra"
+    
+    Returns:
+    Tuple[float, float]: (accuracy, average_correct_probability)
     '''
 
     # Get hook point
@@ -108,18 +101,46 @@ def get_mmlu_accuracy(model : HookedTransformer,
     data = load_dataset("cais/mmlu", subject, split="test") 
     formatted_prompts, correct_answers = prepare_dataset(data)
 
-    # Run model with SAE patching to get accuracy
+    # Define all possible variations of answer options
+    answer_variations = {
+        "A": ["A", "a", " A", " a"],
+        "B": ["B", "b", " B", " b"],
+        "C": ["C", "c", " C", " c"],
+        "D": ["D", "d", " D", " d"]
+    }
+
+    # Run model with SAE patching to get accuracy and average correct probability
     num_correct = 0
-    num_invalid = 0
+    total_correct_prob = 0.0
+    
     for (prompt, answer) in tqdm(zip(formatted_prompts, correct_answers)):
-        output_token_id = model.run_with_hooks(
+        logits = model.run_with_hooks(
             prompt, 
             fwd_hooks=[(hook_pt, patch_hook)]
-            )[0, -1].argmax()
-        output_answer_id = str_to_num(model.tokenizer.decode(output_token_id))
-        if output_answer_id == answer:
+            )[0, -1]
+        
+        # Get probabilities for all variations of A, B, C, D
+        option_probs = torch.zeros(4)
+        for i, option in enumerate(["A", "B", "C", "D"]):
+            option_prob = 0
+            for variation in answer_variations[option]:
+                variation_token_id = model.tokenizer.encode(variation)[-1]
+                option_prob += logits[variation_token_id].exp().item()
+            option_probs[i] = option_prob
+        
+        # Normalize probabilities
+        option_probs = option_probs / option_probs.sum()
+        
+        # Get the predicted answer and its probability
+        predicted_answer = NUM_TO_STR[option_probs.argmax().item()]
+        correct_prob = option_probs[answer].item()
+        
+        # Update accuracy and total correct probability
+        if STR_TO_NUM[predicted_answer] == answer:
             num_correct += 1
-        elif output_answer_id == 'invalid_answer':
-            num_invalid += 1
-    print(f"model output invalid answer for {num_invalid/len(formatted_prompts)/100:.1f}% of prompts")
-    return num_correct / len(formatted_prompts)
+        total_correct_prob += correct_prob
+    
+    accuracy = num_correct / len(formatted_prompts)
+    avg_correct_prob = total_correct_prob / len(formatted_prompts)
+    
+    return accuracy, avg_correct_prob

@@ -522,7 +522,7 @@ class ToyModelSAERunnerConfig:
 
     dataset_trust_remote_code : bool = True
     architecture: Literal["standard", "gated"] = "standard"
-
+dead
     # ReLu Model Parameters
     n_features: int = 5
     n_hidden: int = 2

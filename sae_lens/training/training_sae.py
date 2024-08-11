@@ -561,6 +561,11 @@ class TrainingSAE(SAE):
             )
             self.initialize_decoder_norm_constant_norm()
 
+        # if using a GSAE, the thing we're reconstructing has small norm, so make initialized weights smaller
+        if self.gsae:
+            self.W_dec.data /= 10
+        
+
         # Then we initialize the encoder weights (either as the transpose of decoder or not)
         if self.cfg.init_encoder_as_decoder_transpose:
             self.W_enc.data = self.W_dec.data.T.clone().contiguous()
