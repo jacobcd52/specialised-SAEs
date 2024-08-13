@@ -158,6 +158,7 @@ class ActivationsStore:
         model_kwargs: dict[str, Any] | None = None,
         autocast_lm: bool = False,
         dataset_trust_remote_code: bool | None = None,
+        first_activation_pos: int = 2,
     ):
         self.model = model
         if model_kwargs is None:
@@ -173,6 +174,8 @@ class ActivationsStore:
             if isinstance(dataset, str)
             else dataset
         )
+
+        self.first_activation_pos = first_activation_pos
         # if isinstance(dataset, (Dataset, DatasetDict)):
         #     self.dataset = cast(Dataset | DatasetDict, self.dataset)
         # MAYBE NEED THIS
@@ -481,6 +484,8 @@ class ActivationsStore:
 
         while batch_tokens.shape[0] < batch_size:
             tokens = self._get_next_dataset_tokens()
+            print("next tokens shape", tokens.shape)
+            print("next tokens", self.model.tokenizer.decode(tokens[-30:]))
             token_len = tokens.shape[0]
 
             # TODO: Fix this so that we are limiting how many tokens we get from the same context.
@@ -657,11 +662,14 @@ class ActivationsStore:
         else:
             stacked_activations[:, :, 0] = layerwise_activations[self.hook_name]
 
+
+        stacked_activations = stacked_activations[:, self.first_activation_pos:, :]
+
         return stacked_activations
 
     @torch.no_grad()
     def get_buffer(self, n_batches_in_buffer: int) -> tuple[torch.Tensor, torch.Tensor]:
-        context_size = self.context_size
+        context_size = self.context_size - self.first_activation_pos
         batch_size = self.store_batch_size_prompts
         d_in = self.d_in
         num_layers = 1
@@ -763,7 +771,7 @@ class ActivationsStore:
                     print("Warning: Empty batch tokens encountered. Exiting refill loop.")
                     break
 
-                refill_batch_activations = self.get_activations(refill_batch_tokens).view(-1, num_layers, d_in)
+                refill_batch_activations = self.get_activations(refill_batch_tokens).reshape(-1, num_layers, d_in)
                 main_activations_list.append(refill_batch_activations)
 
         if self.control_dataset and self.control_mixture and len(control_activations_list) > 0:

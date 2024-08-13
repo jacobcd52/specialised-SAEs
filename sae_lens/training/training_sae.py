@@ -368,7 +368,7 @@ class TrainingSAE(SAE):
             per_item_mse_loss = self.mse_loss_fn(sae_out, target)
 
             # calculate control and main losses for logging
-            mse_loss = per_item_mse_loss.sum(dim=-1).mean()
+            mse_loss = per_item_mse_loss.sum(dim=-1).mean()  # chop off BOS
             control_mse_loss = per_item_mse_loss[:control_batch_size].sum(dim=-1).mean()
             main_mse_loss = per_item_mse_loss[control_batch_size:].sum(dim=-1).mean()
 

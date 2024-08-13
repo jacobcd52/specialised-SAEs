@@ -220,7 +220,7 @@ class SAETrainer:
             sae.set_decoder_norm_to_unit_norm()
 
         # log and then reset the feature sparsity every feature_sampling_window steps
-        if (self.n_training_steps + 1) % self.cfg.feature_sampling_window == 0:
+        if (self.n_training_steps - 1) % self.cfg.feature_sampling_window == 0:
             if self.cfg.log_to_wandb:
                 sparsity_log_dict = self._build_sparsity_log_dict()
                 wandb.log(sparsity_log_dict, step=self.n_training_steps)
@@ -266,7 +266,7 @@ class SAETrainer:
 
     @torch.no_grad()
     def _log_train_step(self, step_output: TrainStepOutput):
-        if (self.n_training_steps + 1) % self.cfg.wandb_log_frequency == 0:
+        if (self.n_training_steps - 1) % self.cfg.wandb_log_frequency == 0:
             wandb.log(
                 self._build_train_step_log_dict(
                     output=step_output,
@@ -332,7 +332,7 @@ class SAETrainer:
     @torch.no_grad()
     def _run_and_log_evals(self):
         # record loss frequently, but not all the time.
-        if (self.n_training_steps) % (
+        if (self.n_training_steps - 1) % (
             self.cfg.wandb_log_frequency * self.cfg.eval_every_n_wandb_logs
         ) == 1:
             self.sae.eval()

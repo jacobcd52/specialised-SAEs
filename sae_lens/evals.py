@@ -185,27 +185,30 @@ def get_recons_loss(
     head_index = sae.cfg.hook_head_index
 
     model.reset_hooks()
-    loss = model(batch_tokens, return_type="loss", **model_kwargs)
+
+    start_pos = activation_store.first_activation_pos
+
+    loss = model(batch_tokens, return_type="loss", loss_per_token=True, **model_kwargs)[:,start_pos:].mean()
 
     # TODO(tomMcGrath): the rescaling below is a bit of a hack and could probably be tidied up
     def standard_replacement_hook(activations: torch.Tensor, hook: Any):
-
+        
         original_device = activations.device
         activations = activations.to(sae.device)
 
         # Handle rescaling if SAE expects it
         if activation_store.normalize_activations == "expected_average_only_in":
-            activations = activation_store.apply_norm_scaling_factor(activations)
+            activations[:,start_pos:] = activation_store.apply_norm_scaling_factor(activations[:,start_pos:])
 
         # SAE class agnost forward forward pass. JACOB
         if sae.gsae:
-            activations = sae.decode(sae.encode(activations)).to(activations.dtype) + sae.gsae(activations).to(activations.dtype)
+            activations[:,start_pos:] = sae.decode(sae.encode(activations[:,start_pos:])).to(activations.dtype) + sae.gsae(activations[:,start_pos:]).to(activations.dtype)
         else:
-            activations = sae.decode(sae.encode(activations)).to(activations.dtype)
+            activations[:,start_pos:] = sae.decode(sae.encode(activations[:,start_pos:])).to(activations.dtype)
  
         # Unscale if activations were scaled prior to going into the SAE
         if activation_store.normalize_activations == "expected_average_only_in":
-            activations = activation_store.unscale(activations)
+            activations[:,start_pos:] = activation_store.unscale(activations[:,start_pos:])
 
         return activations.to(original_device)
 
@@ -216,15 +219,15 @@ def get_recons_loss(
 
         # Handle rescaling if SAE expects it
         if activation_store.normalize_activations == "expected_average_only_in":
-            activations = activation_store.apply_norm_scaling_factor(activations)
+            activations[:,start_pos:] = activation_store.apply_norm_scaling_factor(activations[:,start_pos:])
 
         # SAE class agnost forward forward pass.
-        new_activations = sae.decode(sae.encode(activations.flatten(-2, -1))).to(
+        new_activations = sae.decode(sae.encode(activations[:,start_pos:].flatten(-2, -1))).to(
             activations.dtype
         )
 
         new_activations = new_activations.reshape(
-            activations.shape
+            activations[:,start_pos:].shape
         )  # reshape to match original shape
 
         # Unscale if activations were scaled prior to going into the SAE
@@ -240,16 +243,16 @@ def get_recons_loss(
 
         # Handle rescaling if SAE expects it
         if activation_store.normalize_activations == "expected_average_only_in":
-            activations = activation_store.apply_norm_scaling_factor(activations)
+            activations[:,start_pos:] = activation_store.apply_norm_scaling_factor(activations[:,start_pos:])
 
-        new_activations = sae.decode(sae.encode(activations[:, :, head_index])).to(
+        new_activations = sae.decode(sae.encode(activations[:, start_pos:, head_index])).to(
             activations.dtype
         )
-        activations[:, :, head_index] = new_activations
+        activations[:, start_pos:, head_index] = new_activations
 
         # Unscale if activations were scaled prior to going into the SAE
         if activation_store.normalize_activations == "expected_average_only_in":
-            activations = activation_store.unscale(activations)
+            activations[:,start_pos:] = activation_store.unscale(activations[:,start_pos:])
         return activations.to(original_device)
 
     def zero_ablate_hook(activations: torch.Tensor, hook: Any):
@@ -258,9 +261,9 @@ def get_recons_loss(
 
         # JACOB
         if sae.gsae:
-            activations = sae.gsae(activations)
+            activations[:,start_pos:] = sae.gsae(activations[:,start_pos:])
         else:
-            activations = torch.zeros_like(activations)
+            activations[:,start_pos:] = torch.zeros_like(activations[:,start_pos:])
 
         return activations.to(original_device)
 
@@ -279,9 +282,10 @@ def get_recons_loss(
     recons_loss = model.run_with_hooks(
         batch_tokens,
         return_type="loss",
+        loss_per_token=True,
         fwd_hooks=[(hook_name, partial(replacement_hook))],
         **model_kwargs,
-    )
+    )[:, start_pos:].mean()
 
     model.reset_hooks()
     zero_abl_loss = model.run_with_hooks(

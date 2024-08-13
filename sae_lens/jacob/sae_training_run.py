@@ -12,9 +12,9 @@ from huggingface_hub import login, HfApi
 login(token="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")
 api = HfApi()
 
-
+#########
 dead_feature_window = 100_000
-total_training_steps = 2_000
+total_training_steps = 2000
 batch_size = 4096
 
 total_training_tokens = total_training_steps * batch_size
@@ -24,20 +24,20 @@ l1_warm_up_steps = total_training_steps // 20  # 5% of training
 
 expansion_factor=2
 model_name = "gemma-2-2b"
-# layer = 7
-# gsae_id = "layer_7/width_16k/average_l0_20"
-# gsae_width = "16k"
+
+d_in=2304 if model_name == "gemma-2-2b" else 2048
 
 control_mixture = 0
 lr = 1e-3
 
 for (layer, gsae_id, gsae_width, l1_coefficient) in [
-                                                    # (7, "layer_7/width_16k/average_l0_20", "16k", 150),
-                                                     (13, "layer_13/width_65k/average_l0_74", "65k", 300)
+                                                    # (12, "layer_12/width_16k/average_l0_22", "16k", 20),
+                                                     (7, "layer_7/width_16k/average_l0_36", "16k", 100),
+                                                     (13, "layer_13/width_65k/average_l0_74", "65k", 150)
                                                      ]:
     for subject in ["hs_bio_cleaned", "hs_phys_cleaned", "hs_math_cleaned", "college_bio_cleaned", "college_phys_cleaned", "college_math_cleaned", "econ_cleaned", "history_cleaned"]:
 
-        hook_name = f"blocks.{layer}.hook_resid_post"
+        hook_name = f"blocks.{layer}.hook_resid_post" if model_name == "gemma-2-2b" else f"blocks.{layer}.hook_resid_pre"
         run_name = f"{model_name}_layer{layer}_{subject}_l1={l1_coefficient}_expansion={expansion_factor}_tokens={batch_size*total_training_steps}_gsaewidth={gsae_width}"
     
         cfg = LanguageModelSAERunnerConfig(
@@ -61,15 +61,15 @@ for (layer, gsae_id, gsae_width, l1_coefficient) in [
             dataset_path=f'jacobcd52/{subject}',
             is_dataset_tokenized=False,
             wandb_project=f"{model_name}-layer{layer}-ssae",
-            context_size=256,
+            context_size=128,
             # from_pretrained_path="/root/specialised-SAEs/sae_lens/jacob/temp_sae",
 
             # Data Generating Function (Model + Training Distribution)
-            architecture="gated",  # we'll use the gated variant.
+            architecture="gated",
             model_name=model_name,  # our model (more options here: https://neelnanda-io.github.io/TransformerLens/generated/model_properties_table.html)
             hook_name=hook_name,  # A valid hook point (see more details here: https://neelnanda-io.github.io/TransformerLens/generated/demos/Main_Demo.html#Hook-Points)
             hook_layer=layer,  # Only one layer in the model.
-            d_in=2304,  # the width of the mlp output.
+            d_in=d_in,  # the width of the mlp output.
             streaming=True,  # we could pre-download the token dataset if it was small.
             # SAE Parameters
             mse_loss_normalization=None,  # We won't normalize the mse loss,
@@ -101,7 +101,7 @@ for (layer, gsae_id, gsae_width, l1_coefficient) in [
             # WANDB
             log_to_wandb=True,  # always use wandb unless you are just testing code.
             run_name = run_name,
-            wandb_log_frequency=30, #30
+            wandb_log_frequency=20,
             eval_every_n_wandb_logs=20, #20
             # Misc
             device="cuda",
