@@ -14,15 +14,15 @@ api = HfApi()
 
 #########
 dead_feature_window = 100_000
-total_training_steps = 4000
+total_training_steps = 6000
 batch_size = 4096
 
 total_training_tokens = total_training_steps * batch_size
 lr_warm_up_steps = 0
 lr_decay_steps = total_training_steps // 5  # 20% of training
-l1_warm_up_steps = total_training_steps // 20  # 5% of training
+l1_warm_up_steps = total_training_steps // 20  # 20% of training
 
-expansion_factor=4
+expansion_factor=2
 model_name = "gemma-2-2b"
 
 first_activation_pos = 2
@@ -30,17 +30,18 @@ first_activation_pos = 2
 d_in=2304 if model_name == "gemma-2-2b" else 2048
 
 control_mixture = 0
-lr = 5e-4
+lr = 1e-3
 
 for (layer, gsae_id, gsae_width, l1_coefficient) in [
                                                     # (12, "layer_12/width_16k/average_l0_22", "16k", 20),
-                                                     (7, "layer_7/width_16k/average_l0_20", "16k", 70),
-                                                    #  (13, "layer_13/width_65k/average_l0_74", "65k", 150)
+                                                     (7, "layer_7/width_16k/average_l0_20", "16k", 15),
+                                                     (13, "layer_13/width_65k/average_l0_40", "65k", 40)
                                                      ]:
-    for subject in ["history_cleaned"]: #["hs_bio_cleaned", "hs_phys_cleaned", "hs_math_cleaned", "college_bio_cleaned", "college_phys_cleaned", "college_math_cleaned", "econ_cleaned", "history_cleaned"]:
+    for subject in ["hs_bio_cleaned", "hs_phys_cleaned", "hs_math_cleaned", "college_bio_cleaned", "college_phys_cleaned", "college_math_cleaned", "econ_cleaned", "history_cleaned"]:
 
         hook_name = f"blocks.{layer}.hook_resid_post" if model_name == "gemma-2-2b" else f"blocks.{layer}.hook_resid_pre"
-        run_name = f"{model_name}_layer{layer}_{subject}_l1={l1_coefficient}_expansion={expansion_factor}_tokens={batch_size*total_training_steps}_gsaewidth={gsae_width}"
+        gsae_id_ = gsae_id.replace("/", "_")
+        run_name = f"{model_name}_layer{layer}_{subject}_l1={l1_coefficient}_expansion={expansion_factor}_tokens={batch_size*total_training_steps}_gsae_id={gsae_id_}"
     
         cfg = LanguageModelSAERunnerConfig(
             # JACOB

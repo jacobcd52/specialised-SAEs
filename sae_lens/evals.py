@@ -200,6 +200,7 @@ def get_recons_loss(
 
         # Handle rescaling if SAE expects it
         if activation_store.normalize_activations == "expected_average_only_in":
+            print("applying rescaling during patching")
             activations[:,start_pos:] = activation_store.apply_norm_scaling_factor(activations[:,start_pos:])
 
         # SAE class agnost forward forward pass. JACOB
@@ -294,9 +295,10 @@ def get_recons_loss(
     zero_abl_loss = model.run_with_hooks(
         batch_tokens,
         return_type="loss",
+        loss_per_token=True,
         fwd_hooks=[(hook_name, zero_ablate_hook)],
         **model_kwargs,
-    )
+    )[:, start_pos:].mean()
     print("zero_abl_loss - recons_loss", zero_abl_loss - recons_loss)
 
     div_val = zero_abl_loss - loss
