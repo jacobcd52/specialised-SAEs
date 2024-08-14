@@ -12,49 +12,53 @@ from huggingface_hub import login, HfApi
 login(token="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")
 api = HfApi()
 
+
+####
+from sae_lens.jacob.load_sae_from_hf import load_sae_from_hf
+load_sae_from_hf("jacobcd52/gemma2-gsae",
+                 "sae_weights.safetensors",
+                 "cfg.json",
+                 dtype="bfloat16")
+
+
 #########
 dead_feature_window = 100_000
-total_training_steps = 4000
+total_training_steps = 2000
 batch_size = 4096
 
 total_training_tokens = total_training_steps * batch_size
 lr_warm_up_steps = 0
 lr_decay_steps = total_training_steps // 5  # 20% of training
-l1_warm_up_steps = total_training_steps // 20  # 5% of training
+l1_warm_up_steps = 0
 
-expansion_factor=4
-model_name = "gemma-2-2b"
-
-first_activation_pos = 2
+expansion_factor=16
+model_name = "gemma-2b-it"
+layer = 12
 
 d_in=2304 if model_name == "gemma-2-2b" else 2048
 
 control_mixture = 0
-lr = 5e-4
+lr = 1e-4
 
-for (layer, gsae_id, gsae_width, l1_coefficient) in [
-                                                    # (12, "layer_12/width_16k/average_l0_22", "16k", 20),
-                                                     (7, "layer_7/width_16k/average_l0_20", "16k", 70),
-                                                    #  (13, "layer_13/width_65k/average_l0_74", "65k", 150)
-                                                     ]:
-    for subject in ["history_cleaned"]: #["hs_bio_cleaned", "hs_phys_cleaned", "hs_math_cleaned", "college_bio_cleaned", "college_phys_cleaned", "college_math_cleaned", "econ_cleaned", "history_cleaned"]:
+first_activation_pos = 0
+
+
+for l1_coefficient in [4]:
+    for subject in ["hs_bio_cleaned", "hs_phys_cleaned", "hs_math_cleaned", "college_bio_cleaned", "college_phys_cleaned", "college_math_cleaned", "econ_cleaned", "history_cleaned"]:
 
         hook_name = f"blocks.{layer}.hook_resid_post" if model_name == "gemma-2-2b" else f"blocks.{layer}.hook_resid_pre"
-        run_name = f"{model_name}_layer{layer}_{subject}_l1={l1_coefficient}_expansion={expansion_factor}_tokens={batch_size*total_training_steps}_gsaewidth={gsae_width}"
+        run_name = f"gsaefinetune_{model_name}_layer{layer}_{subject}_l1={l1_coefficient}_expansion={expansion_factor}_tokens={batch_size*total_training_steps}"
     
         cfg = LanguageModelSAERunnerConfig(
             # JACOB
+            from_pretrained_path="/root/specialised-SAEs/sae_lens/jacob/temp_sae",            
             model_from_pretrained_kwargs = {"dtype" : "bfloat16"},
             b_dec_init_method="mean",
-            # gsae_repo = 'jacobcd52/gemma2-gsae',
-            # gsae_filename = 'sae_weights.safetensors',
-            # gsae_cfg_filename = 'cfg.json',
-            gsae_release = 'gemma-scope-2b-pt-res',
-            gsae_id = gsae_id,
 
             first_activation_pos = first_activation_pos,
-            
+
             apply_b_dec_to_input=True,  # We won't apply the decoder weights to the input.
+
 
             control_dataset_path=None,
             is_control_dataset_tokenized=False,
@@ -64,7 +68,7 @@ for (layer, gsae_id, gsae_width, l1_coefficient) in [
             dtype="bfloat16",
             dataset_path=f'jacobcd52/{subject}',
             is_dataset_tokenized=False,
-            wandb_project=f"{model_name}-layer{layer}-ssae",
+            wandb_project=f"{model_name}-layer{layer}-gsae-ft",
             context_size=128,
             # from_pretrained_path="/root/specialised-SAEs/sae_lens/jacob/temp_sae",
 
@@ -135,7 +139,7 @@ for (layer, gsae_id, gsae_width, l1_coefficient) in [
                 name += f"_control_mix={cfg.control_mixture}"
 
             # Define the repository ID
-            repo_id = f"jacobcd52/{model_name}-ssae-{subject}"
+            repo_id = f"jacobcd52/{model_name}-gsae-ft-{subject}"
 
             # Try to create the repository if it doesn't exist
             try:

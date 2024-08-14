@@ -22,7 +22,7 @@ class EvalConfig:
     batch_size_prompts: int | None = None
 
     # Reconstruction metrics
-    n_eval_reconstruction_batches: int = 10
+    n_eval_reconstruction_batches: int = 20
     compute_kl: bool = False
     compute_ce_loss: bool = False
 
@@ -35,7 +35,7 @@ class EvalConfig:
 
 def get_eval_everything_config(
     batch_size_prompts: int | None = None,
-    n_eval_reconstruction_batches: int = 10,
+    n_eval_reconstruction_batches: int = 20,
     n_eval_sparsity_variance_batches: int = 1,
 ) -> EvalConfig:
     """
@@ -190,6 +190,8 @@ def get_recons_loss(
 
     loss = model(batch_tokens, return_type="loss", loss_per_token=True, **model_kwargs)[:,start_pos:].mean()
 
+    # print("evaluating on the following tokens:\n", model.tokenizer.batch_decode(batch_tokens[:10]))
+
     # TODO(tomMcGrath): the rescaling below is a bit of a hack and could probably be tidied up
     def standard_replacement_hook(activations: torch.Tensor, hook: Any):
         
@@ -287,6 +289,7 @@ def get_recons_loss(
         **model_kwargs,
     )[:, start_pos:].mean()
 
+
     model.reset_hooks()
     zero_abl_loss = model.run_with_hooks(
         batch_tokens,
@@ -294,9 +297,10 @@ def get_recons_loss(
         fwd_hooks=[(hook_name, zero_ablate_hook)],
         **model_kwargs,
     )
+    print("zero_abl_loss - recons_loss", zero_abl_loss - recons_loss)
 
     div_val = zero_abl_loss - loss
-    div_val[torch.abs(div_val) < 0.0001] = 1.0
+    div_val[torch.abs(div_val) < 0.0001] = 1
     score = (zero_abl_loss - recons_loss) / div_val
 
     return loss, recons_loss, zero_abl_loss, score

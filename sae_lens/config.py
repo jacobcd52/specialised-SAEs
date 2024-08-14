@@ -30,6 +30,7 @@ class LanguageModelSAERunnerConfig:
 
     Args:
         JACOB'S ADDITIONS:
+        first_activation_pos (int) : the first token position whose activations will be fed to the SAE
         gsae_repo (str) : Huggingface repo containing GSAE weights
         gsae_filename (str) : name of .safetensors file containing GSAE weights
         gsae_cfg_filename (str) : name of .json gile containing config
@@ -121,6 +122,8 @@ class LanguageModelSAERunnerConfig:
         model_from_pretrained_kwargs (dict[str, Any]): Additional keyword arguments for the model from pretrained.
     """
     # JACOB
+    first_activation_pos : int = 0
+
     gsae_repo : Optional[str] = None
     gsae_filename : Optional[str] = None
     gsae_cfg_filename : Optional[str] = None
@@ -417,6 +420,7 @@ class LanguageModelSAERunnerConfig:
             "normalize_activations": self.normalize_activations,
 
             # JACOB
+            "first_activation_pos" : self.first_activation_pos,
             "gsae_repo" : self.gsae_repo,
             "gsae_filename" : self.gsae_filename,
             "gsae_cfg_filename" : self.gsae_cfg_filename,

@@ -75,6 +75,7 @@ class ActivationsStore:
         return cls(
             model=model,
             dataset=override_dataset or cfg.dataset_path,
+            first_activation_pos=cfg.first_activation_pos,
             control_dataset_path=getattr(cfg, 'control_dataset_path', None),
             control_mixture=getattr(cfg, 'control_mixture', 0.0),
             is_control_dataset_tokenized=getattr(cfg, 'is_control_dataset_tokenized', False),
@@ -135,6 +136,7 @@ class ActivationsStore:
 
     def __init__(
         self,
+        first_activation_pos: int,
         model: HookedRootModule,
         dataset: HfDataset | str,
         control_dataset_path: str,
@@ -158,7 +160,7 @@ class ActivationsStore:
         model_kwargs: dict[str, Any] | None = None,
         autocast_lm: bool = False,
         dataset_trust_remote_code: bool | None = None,
-        first_activation_pos: int = 2,
+
     ):
         self.model = model
         if model_kwargs is None:
@@ -176,6 +178,7 @@ class ActivationsStore:
         )
 
         self.first_activation_pos = first_activation_pos
+        print("first activation pos", first_activation_pos)
         # if isinstance(dataset, (Dataset, DatasetDict)):
         #     self.dataset = cast(Dataset | DatasetDict, self.dataset)
         # MAYBE NEED THIS
@@ -193,6 +196,7 @@ class ActivationsStore:
             print("using control dataset")
         else:
             print("no control dataset!")
+        self.first_activation_pos = first_activation_pos
         self.control_mixture = control_mixture if control_dataset_path else 0.0
         self.is_control_dataset_tokenized = is_control_dataset_tokenized if control_dataset_path else False
         self.hook_name = hook_name
@@ -484,57 +488,77 @@ class ActivationsStore:
 
         while batch_tokens.shape[0] < batch_size:
             tokens = self._get_next_dataset_tokens()
-            print("next tokens shape", tokens.shape)
-            print("next tokens", self.model.tokenizer.decode(tokens[-30:]))
-            token_len = tokens.shape[0]
+            # chop off BOS token if it's there (we'll put it back later)
+            if tokens[0] == self.model.tokenizer.bos_token_id:
+                tokens = tokens[1:]
 
-            # TODO: Fix this so that we are limiting how many tokens we get from the same context.
-            assert self.model.tokenizer is not None  # keep pyright happy
-            while token_len > 0 and batch_tokens.shape[0] < batch_size:
-                # Space left in the current batch
-                space_left = context_size - current_length
+            # make sure there aren't any more BOS tokens
+            if self.model.tokenizer.bos_token_id in tokens: # JACOB
+                print("unwanted BOS token found in tokens")
+            else:
+                token_len = tokens.shape[0]
 
-                # If the current tokens fit entirely into the remaining space
-                if token_len <= space_left:
-                    current_batch.append(tokens[:token_len])
-                    current_length += token_len
-                    break
+                # TODO: Fix this so that we are limiting how many tokens we get from the same context.
+                assert self.model.tokenizer is not None  # keep pyright happy
+                while token_len > 0 and batch_tokens.shape[0] < batch_size:
+                    # Space left in the current batch
+                    space_left = context_size - current_length
 
-                else:
-                    # Take as much as will fit
-                    current_batch.append(tokens[:space_left])
+                    # If the current tokens fit entirely into the remaining space
+                    if token_len <= space_left:
+                        current_batch.append(tokens[:token_len])
+                        current_length += token_len
+                        break
 
-                    # Remove used part, add BOS
-                    tokens = tokens[space_left:]
-                    token_len -= space_left
+                    else:
+                        # Take as much as will fit
+                        current_batch.append(tokens[:space_left])
 
-                    # only add BOS if it's not already the first token
-                    if self.prepend_bos:
-                        bos_token_id_tensor = torch.tensor(
-                            [self.model.tokenizer.bos_token_id],
-                            device=tokens.device,
-                            dtype=torch.long,
+                        # Remove used part, add BOS
+                        tokens = tokens[space_left:]
+                        token_len -= space_left
+
+                        # # only add BOS if it's not already the first token
+                        # if self.prepend_bos:
+                        #     bos_token_id_tensor = torch.tensor(
+                        #         [self.model.tokenizer.bos_token_id],
+                        #         device=tokens.device,
+                        #         dtype=torch.long,
+                        #     )
+                        #     if tokens[0] != bos_token_id_tensor:
+                        #         tokens = torch.cat(
+                        #             (
+                        #                 bos_token_id_tensor,
+                        #                 tokens,
+                        #             ),
+                        #             dim=0,
+                        #         )
+                        #         token_len += 1
+                        current_length = context_size
+
+                    # If a batch is full, concatenate and move to next batch
+                    if current_length == context_size:
+                        full_batch = torch.cat(current_batch, dim=0)
+                        batch_tokens = torch.cat(
+                            (batch_tokens, full_batch.unsqueeze(0)), dim=0
                         )
-                        if tokens[0] != bos_token_id_tensor:
-                            tokens = torch.cat(
-                                (
-                                    bos_token_id_tensor,
-                                    tokens,
-                                ),
-                                dim=0,
-                            )
-                            token_len += 1
-                    current_length = context_size
-
-                # If a batch is full, concatenate and move to next batch
-                if current_length == context_size:
-                    full_batch = torch.cat(current_batch, dim=0)
-                    batch_tokens = torch.cat(
-                        (batch_tokens, full_batch.unsqueeze(0)), dim=0
-                    )
-                    current_batch = []
-                    current_length = 0
-
+                        current_batch = []
+                        current_length = 0
+        # prepend bos tokens 
+        if self.prepend_bos:
+            bos_token_id_tensor = torch.tensor(
+                [self.model.tokenizer.bos_token_id],
+                device=batch_tokens.device,
+                dtype=torch.long,
+            )
+            batch_tokens = torch.cat(
+                (
+                    bos_token_id_tensor.repeat(batch_tokens.shape[0], 1),
+                    batch_tokens,
+                ),
+                dim=1,
+            )
+        # print(self.model.tokenizer.batch_decode(batch_tokens))
         return batch_tokens[:batch_size].to(self.model.W_E.device)
 
 

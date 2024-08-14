@@ -66,6 +66,7 @@ class TrainingSAEConfig(SAEConfig):
     scale_sparsity_penalty_by_decoder_norm: bool = False
 
     # JACOB
+    first_activation_pos : Optional[int] = None
     gsae_repo : Optional[str] = None
     gsae_filename : Optional[str] = None
     gsae_cfg_filename : Optional[str] = None
@@ -83,6 +84,7 @@ class TrainingSAEConfig(SAEConfig):
 
         return cls(
             # JACOB
+            first_activation_pos = cfg.first_activation_pos,
             gsae_repo = cfg.gsae_repo,
             gsae_filename = cfg.gsae_filename,
             gsae_cfg_filename = cfg.gsae_cfg_filename,
@@ -177,6 +179,7 @@ class TrainingSAEConfig(SAEConfig):
             "sae_lens_training_version": self.sae_lens_training_version,
 
             # JACOB
+            "first_activation_pos" : self.first_activation_pos,
             "gsae_repo" : self.gsae_repo,
             "gsae_filename" : self.gsae_filename,
             "gsae_cfg_filename" : self.gsae_cfg_filename,
