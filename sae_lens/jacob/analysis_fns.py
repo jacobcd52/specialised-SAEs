@@ -107,7 +107,7 @@ def get_l0_freqs_loss_fvu(
 
     num_batches = num_tokens // (tokens.shape[1] * batch_size)
 
-    for b in tqdm(range(num_batches)):
+    for b in range(num_batches):
         # get batch
         batch = tokens[b*batch_size:(b+1)*batch_size]
         losses = model.run_with_hooks(
@@ -140,20 +140,20 @@ def sweep(
     score_list = []
     fvu_recovered_list = []
     
-    for sae_list in tqdm(list_of_sae_lists):
+    for sae_list in list_of_sae_lists:
 
         l0, freqs, all_losses, fvu = get_l0_freqs_loss_fvu(model, sae_list, tokens, num_tokens=num_tokens)
-        l0_list.append(l0)
+        l0_list.append(l0.item())
         # compute loss recovered score
         mask = ceiling_losses - clean_losses > 0.001 # ignore cases where there was no loss to recover in the first place
         
         all_scores = (ceiling_losses[mask].mean() - all_losses[mask].mean()) / (ceiling_losses[mask].mean() - clean_losses[mask].mean())
         
-        print(f"ceiling_losses {ceiling_losses.mean().item():.3f}")
-        print(f"patched_losses {all_losses.mean().item():.3f}")
-        print(f"clean_losses {clean_losses.mean().item():.3f}")
+        # print(f"\nceiling_losses {ceiling_losses.mean().item():.3f}")
+        # print(f"patched_losses {all_losses.mean().item():.3f}")
+        # print(f"clean_losses {clean_losses.mean().item():.3f}\n")
 
-        score_list.append(all_scores.mean())
+        score_list.append(all_scores.mean().item())
 
         # compute variance explained
         fvu_recovered = (ceiling_fvu - fvu) / ceiling_fvu
@@ -162,3 +162,180 @@ def sweep(
         freqs_list.append(freqs)
         
     return l0_list, freqs_list, score_list, fvu_recovered_list
+
+
+
+
+# PLOTTING
+import matplotlib.pyplot as plt
+import os
+def get_freq_plots(ssae_owt_freqs, direct_owt_freqs, gsae_ft_owt_freqs,
+                   ssae_spec_freqs, direct_spec_freqs, gsae_ft_spec_freqs, 
+                   subject):   
+    # DECODERS
+    # choose medium-sparse SSAE and compare frequencies to GSAE
+    gsae_logfreqs = (ssae_owt_freqs[1]['gsae'] + 1e-8).log10().cpu()
+    ssae_logfreqs = (ssae_owt_freqs[1]['ssae'] + 1e-8).log10().cpu()
+    direct_logfreqs = (direct_owt_freqs[1]['gsae'] + 1e-8).log10().cpu()
+    gsae_ft_logfreqs = (gsae_ft_owt_freqs[1]['gsae'] + 1e-8).log10().cpu()
+
+    # Plotting the histograms
+    plt.hist(gsae_logfreqs.numpy(), bins=70, alpha=0.4, label='GSAE', density=True)
+    plt.hist(ssae_logfreqs.numpy(), bins=70, alpha=0.4, label='SSAE', density=True)
+    plt.hist(direct_logfreqs.numpy(), bins=70, alpha=0.4, label='Direct SAE', density=True)
+    plt.hist(gsae_ft_logfreqs.numpy(), bins=70, alpha=0.4, label='GSAE Finetune', density=True)
+
+    # Adding labels and title
+    plt.xlabel('Log Frequencies')
+    plt.ylabel('Probability density')
+    plt.title(f'{subject[:-8]}: Histogram of GSAE and SSAE Log Frequencies on OWT')
+    plt.legend()
+
+    directory = 'plots/owt_freqs'
+    filename = f'{subject}.png'
+    filepath = os.path.join(directory, filename)
+    if not os.path.exists(directory):
+        os.makedirs(directory)
+    plt.savefig(filepath)
+    plt.close()
+
+
+    # choose sparsest SSAE and compare frequencies to GSAE
+    gsae_logfreqs = (ssae_spec_freqs[1]['gsae'] + 1e-8).log10().cpu()
+    ssae_logfreqs = (ssae_spec_freqs[1]['ssae'] + 1e-8).log10().cpu()
+    direct_logfreqs = (direct_spec_freqs[1]['gsae'] + 1e-8).log10().cpu()
+    gsae_ft_logfreqs = (gsae_ft_spec_freqs[1]['gsae'] + 1e-8).log10().cpu()
+
+    # Plotting the histograms
+    plt.hist(gsae_logfreqs.numpy(), bins=70, alpha=0.4, label='GSAE', density=True)
+    plt.hist(ssae_logfreqs.numpy(), bins=70, alpha=0.4, label='SSAE', density=True)
+    plt.hist(direct_logfreqs.numpy(), bins=70, alpha=0.4, label='Direct', density=True)
+    plt.hist(gsae_ft_logfreqs.numpy(), bins=70, alpha=0.4, label='GSAE Finetune', density=True)
+
+    # Adding labels and title
+    plt.xlabel('Log Frequencies')
+    plt.ylabel('Probability density')
+    plt.title(f'{subject[:-8]}: Histogram of GSAE and SSAE Log Frequencies on specialized dataset')
+    plt.legend()
+
+    directory = 'plots/spec_freqs'
+    filename = f'{subject}.png'
+    filepath = os.path.join(directory, filename)
+    if not os.path.exists(directory):
+        os.makedirs(directory)
+    plt.savefig(filepath)
+    plt.close()
+
+
+
+
+
+def get_cossim_plots(gsae, gsae_ft_list, ssae_list, 
+                     ssae_l1_list, gsae_ft_l1_list,
+                     subject):
+    # DECOEDERS
+    # Create a single figure with two rows
+    fig, axes = plt.subplots(2, len(ssae_list), figsize=(15, 10))
+
+    # GSAE-ft ZOOMED (First row)
+    for i, sae in enumerate(gsae_ft_list):
+        gsae_W_dec = gsae.W_dec / gsae.W_dec.norm(dim=1, keepdim=True)
+        sae_W_dec = sae.W_dec / sae.W_dec.norm(dim=1, keepdim=True)
+        maxsims = (gsae_W_dec @ sae_W_dec.T).max(0).values.to(torch.float32).cpu().detach()
+        
+        # Select the current axis in the first row
+        ax = axes[0, i]
+        
+        # Plot the histogram on the current axis
+        ax.hist(maxsims, bins=100, alpha=1.0)
+        ax.set_xlabel('Max cossim')
+        ax.set_ylabel('Frequency')
+        ax.set_title(f'GSAE-ft: l1_coeff = {gsae_ft_l1_list[i]}')
+        ax.set_xlim([0, 1])
+        ax.set_ylim([0, 500])
+
+    # SSAE (Second row)
+    for i, sae in enumerate(ssae_list):
+        gsae_W_dec = gsae.W_dec / gsae.W_dec.norm(dim=1, keepdim=True)
+        sae_W_dec = sae.W_dec / sae.W_dec.norm(dim=1, keepdim=True)
+        maxsims = (gsae_W_dec @ sae_W_dec.T).max(0).values.to(torch.float32).cpu().detach()
+        
+        # Select the current axis in the second row
+        ax = axes[1, i]
+        
+        # Plot the histogram on the current axis
+        ax.hist(maxsims, bins=50, alpha=1.0)
+        ax.set_xlabel('Max cossim')
+        ax.set_ylabel('Frequency')
+        ax.set_title(f'SSAE: l1_coeff = {ssae_l1_list[i]}')
+        ax.set_xlim([0, 1])
+        ax.set_ylim([0, 500])
+
+    # Add row titles
+    fig.text(0.5, 0.98, f'{subject[:-8]}: Max decoder cossim between GSAE-finetune & GSAE', ha='center', va='center', fontsize=16)
+    fig.text(0.5, 0.51, f'{subject[:-8]}: Max decoder cossim between SSAE & GSAE', ha='center', va='center', fontsize=16)
+
+    # Adjust the layout
+    plt.tight_layout()
+
+    directory = 'plots/dec_cossimss'
+    filename = f'{subject}.png'
+    filepath = os.path.join(directory, filename)
+    if not os.path.exists(directory):
+        os.makedirs(directory)
+    plt.savefig(filepath)
+    plt.close()
+
+
+    # ENCODERS
+    # Create a single figure with two rows
+    fig, axes = plt.subplots(2, len(ssae_list), figsize=(15, 10))
+
+    # GSAE-ft ZOOMED (First row)
+    for i, sae in enumerate(gsae_ft_list):
+        gsae_W_enc = gsae.W_enc / gsae.W_enc.norm(dim=0, keepdim=True)
+        sae_W_enc = sae.W_enc / sae.W_enc.norm(dim=0, keepdim=True)
+        maxsims = (gsae_W_enc.T @ sae_W_enc).max(0).values.to(torch.float32).cpu().detach()
+        
+        # Select the current axis in the first row
+        ax = axes[0, i]
+        
+        # Plot the histogram on the current axis
+        ax.hist(maxsims, bins=100, alpha=1.0)
+        ax.set_xlabel('Max cossim')
+        ax.set_ylabel('Frequency')
+        ax.set_title(f'GSAE-ft: l1_coeff = {gsae_ft_l1_list[i]}')
+        ax.set_xlim([0, 1])
+        ax.set_ylim([0, 500])
+
+    # SSAE (Second row)
+    for i, sae in enumerate(ssae_list):
+        gsae_W_enc = gsae.W_enc / gsae.W_enc.norm(dim=0, keepdim=True)
+        sae_W_enc = sae.W_enc / sae.W_enc.norm(dim=0, keepdim=True)
+        maxsims = (gsae_W_enc.T @ sae_W_enc).max(0).values.to(torch.float32).cpu().detach()
+        
+        # Select the current axis in the second row
+        ax = axes[1, i]
+        
+        # Plot the histogram on the current axis
+        ax.hist(maxsims, bins=50, alpha=1.0)
+        ax.set_xlabel('Max cossim')
+        ax.set_ylabel('Frequency')
+        ax.set_title(f'SSAE: l1_coeff = {ssae_l1_list[i]}')
+        ax.set_xlim([0, 1])
+        ax.set_ylim([0, 500])
+
+    # Add row titles
+    fig.text(0.5, 0.98, f'{subject[:-8]}: Max encoder cossim between GSAE-finetune & GSAE', ha='center', va='center', fontsize=16)
+    fig.text(0.5, 0.51, f'{subject[:-8]}: Max encoder cossim between SSAE & GSAE', ha='center', va='center', fontsize=16)
+
+    # Adjust the layout
+    plt.tight_layout()
+
+    directory = 'plots/enc_cossimss'
+    filename = f'{subject}.png'
+    filepath = os.path.join(directory, filename)
+    if not os.path.exists(directory):
+        os.makedirs(directory)
+    plt.savefig(filepath)
+    plt.close()
