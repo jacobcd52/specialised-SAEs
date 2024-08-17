@@ -20,7 +20,7 @@ def get_owt_and_spec_tokens(model, spec_path, remove_bos=True, ctx_length=128):
     data = load_dataset("stas/openwebtext-10k", split="train")
     tokenized_data = utils.tokenize_and_concatenate(data, model.tokenizer, max_length=ctx_length)
     tokenized_data = tokenized_data.shuffle(42)
-    owt_tokens = tokenized_data["tokens"][:20_000]
+    owt_tokens = tokenized_data["tokens"][:200_000]
     if remove_bos:
         owt_tokens = remove_entries_with_bos(model, owt_tokens)
 
