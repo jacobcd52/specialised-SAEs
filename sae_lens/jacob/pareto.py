@@ -21,15 +21,16 @@ torch.set_grad_enabled(False)
 DTYPE = "bfloat16"
 
 
-
+print("TEST1")
 
 # Load SAEs, model and dataset
 gsae = load_sae_from_hf("jacobcd52/gemma2-gsae", 
                         "sae_weights.safetensors", 
                         "cfg.json",
                         device="cuda", dtype=DTYPE)
+print("TEST2")
 model = HookedTransformer.from_pretrained_no_processing("gemma-2b-it", device="cuda", dtype=DTYPE)
-
+print("TEST3")
 # Sanity check: the GSAE error should be smaller than the original activation
 loss, cache = model.run_with_cache("My name is Jacob, and I come from London, England.", return_type="loss", names_filter=[gsae.cfg.hook_name])
 act = cache[gsae.cfg.hook_name]
@@ -121,7 +122,8 @@ def run_subject(model, subject, num_tokens=100_000):
                     subject)
 
     get_cossim_plots(gsae, gsae_ft_list, ssae_list, 
-                        ssae_l1_list, gsae_ft_l1_list,                    
+                        ssae_l1_list, gsae_ft_l1_list,        
+                        direct_sae_list, direct_sae_l1_list,            
                         subject)
 
     # return pareto data
@@ -153,18 +155,82 @@ def run_subject(model, subject, num_tokens=100_000):
     return gsae_ft_owt_data, ssae_owt_data, direct_owt_data, gsae_ft_spec_data, ssae_spec_data, direct_spec_data
 
 
-
-
 # RUN
-subject_to_data = {}
-for subject in ["hs_bio_cleaned",
+subject_list = ["hs_bio_cleaned",
                 "hs_math_cleaned", "hs_phys_cleaned", 
                 "college_bio_cleaned", "college_math_cleaned", "college_phys_cleaned",
                 "history_cleaned", "econ_cleaned"
-                ]:
-    subject_to_data[subject] = run_subject(model, subject, num_tokens=1_000_000)
+                ]
+subject_to_data = {}
+print("TEST4")
+for subject in subject_list:
+    print("analysing", subject)
+    subject_to_data[subject] = run_subject(model, subject, num_tokens=2000_000)
 
 # Save as a pickle file
 import pickle
 with open('subject_to_data.pkl', 'wb') as pickle_file:
     pickle.dump(subject_to_data, pickle_file)
+
+
+# plot pareto curves
+import os
+for subject in subject_list:
+    gsae_ft_owt_data, ssae_owt_data, direct_owt_data, gsae_ft_spec_data, ssae_spec_data, direct_spec_data = subject_to_data[subject]
+
+    # plot gsae_ft_spec_l0 vs gsae_ft_spec_scores. Lines are blue, opacity = 0.5
+    plt.plot(gsae_ft_spec_data["l0"], gsae_ft_spec_data["scores"], color="blue", alpha=0.5)
+    # plot ssae_spec_l0 vs ssae_spec_scores. Lines are orange, opacity = 0.5
+    plt.plot(ssae_spec_data["l0"], ssae_spec_data["scores"], color="red", alpha=0.8)
+    # plot direct_spec_l0 vs direct_spec_scores. Lines are green, opacity = 0.5
+    plt.plot(direct_spec_data["l0"], direct_spec_data["scores"], color="gray", alpha=0.2)
+
+    # set x range to be 0 to 70
+    plt.xlim(10, 70)
+    plt.ylim(-1, 1)
+
+# add x and y labels and title
+plt.xlabel("L0")
+plt.ylabel("frac loss recovered")
+plt.title(f"Loss recovered relative to GSAE on subject-specific data")
+
+# add legend
+plt.legend(["GSAE finetune", "SSAE", "Direct SAE"])
+
+directory = 'plots'
+filename = f'spec_pareto.png'
+filepath = os.path.join(directory, filename)
+if not os.path.exists(directory):
+    os.makedirs(directory)
+plt.savefig(filepath)
+# close plot
+plt.close()
+
+
+for subject in subject_list:
+    gsae_ft_owt_data, ssae_owt_data, direct_owt_data, gsae_ft_spec_data, ssae_spec_data, direct_spec_data = subject_to_data[subject]
+
+    # plot gsae_ft_spec_l0 vs gsae_ft_spec_scores. Lines are blue, opacity = 0.5
+    plt.plot(gsae_ft_owt_data["l0"], gsae_ft_owt_data["scores"], color="blue", alpha=0.5)
+    # plot ssae_spec_l0 vs ssae_spec_scores. Lines are orange, opacity = 0.5
+    plt.plot(ssae_owt_data["l0"], ssae_owt_data["scores"], color="red", alpha=0.8)
+    # plot direct_spec_l0 vs direct_spec_scores. Lines are green, opacity = 0.5
+    plt.plot(direct_owt_data["l0"], direct_owt_data["scores"], color="gray", alpha=0.2)
+
+    # set x range to be 0 to 70
+    plt.xlim(10, 70)
+    plt.ylim(-1, 1)
+
+# add x and y labels and title
+plt.xlabel("L0")
+plt.ylabel("frac loss recovered")
+plt.title(f"Loss recovered relative to GSAE on OWT")
+
+
+directory = 'plots'
+filename = f'owt_pareto.png'
+filepath = os.path.join(directory, filename)
+if not os.path.exists(directory):
+    os.makedirs(directory)
+plt.savefig(filepath)
+plt.close()

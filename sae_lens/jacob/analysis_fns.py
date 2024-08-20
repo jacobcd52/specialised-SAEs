@@ -11,13 +11,13 @@ def remove_entries_with_bos(model, tokens):
     for i in range(tokens.shape[0]):
         if not model.tokenizer.bos_token_id in tokens[i, 1:]:
             new_tokens.append(tokens[i, :])
-    new_tokens = torch.stack(new_tokens).cuda()
+    new_tokens = torch.stack(new_tokens)
     return new_tokens
 
 def get_owt_and_spec_tokens(model, spec_path, remove_bos=True, ctx_length=128):
 
     # Get owt tokens
-    data = load_dataset("stas/openwebtext-10k", split="train")
+    data = load_dataset("stas/openwebtext-10k", split="train[:20%]")
     tokenized_data = utils.tokenize_and_concatenate(data, model.tokenizer, max_length=ctx_length)
     tokenized_data = tokenized_data.shuffle(42)
     owt_tokens = tokenized_data["tokens"][:200_000]
@@ -36,7 +36,7 @@ def get_owt_and_spec_tokens(model, spec_path, remove_bos=True, ctx_length=128):
     data = data.filter(remove_null_entries)
     tokenized_data = utils.tokenize_and_concatenate(data, model.tokenizer, max_length=ctx_length)
     tokenized_data = tokenized_data.shuffle(42)
-    spec_tokens = tokenized_data["tokens"][:20_000].cuda()
+    spec_tokens = tokenized_data["tokens"][:100_000]
     if remove_bos:
         spec_tokens = remove_entries_with_bos(model, spec_tokens)
     print("spec_tokens has shape", spec_tokens.shape)
@@ -107,9 +107,9 @@ def get_l0_freqs_loss_fvu(
 
     num_batches = num_tokens // (tokens.shape[1] * batch_size)
 
-    for b in range(num_batches):
+    for b in tqdm(range(num_batches)):
         # get batch
-        batch = tokens[b*batch_size:(b+1)*batch_size]
+        batch = tokens[b*batch_size:(b+1)*batch_size].cuda()
         losses = model.run_with_hooks(
             batch,
             return_type="loss",
@@ -230,110 +230,236 @@ def get_freq_plots(ssae_owt_freqs, direct_owt_freqs, gsae_ft_owt_freqs,
 
 
 
+# def get_cossim_plots(gsae, gsae_ft_list, ssae_list, 
+#                      ssae_l1_list, gsae_ft_l1_list,
+#                      direct_sae_list, direct_sae_l1_list,
+#                      subject):
+#     # DECODERS
+#     # Create a single figure with three rows
+#     fig, axes = plt.subplots(3, len(ssae_list), figsize=(15, 10))
+
+#     # GSAE-ft ZOOMED (First row)
+#     for i, sae in enumerate(gsae_ft_list):
+#         gsae_W_dec = gsae.W_dec / gsae.W_dec.norm(dim=1, keepdim=True)
+#         sae_W_dec = sae.W_dec / sae.W_dec.norm(dim=1, keepdim=True)
+#         maxsims = (gsae_W_dec @ sae_W_dec.T).max(0).values.to(torch.float32).cpu().detach()
+        
+#         # Select the current axis in the first row
+#         ax = axes[0, i]
+        
+#         # Plot the histogram on the current axis
+#         ax.hist(maxsims, bins=100, alpha=1.0)
+#         ax.set_xlabel('Max cossim')
+#         ax.set_ylabel('Frequency')
+#         ax.set_title(f'GSAE-ft: l1_coeff = {gsae_ft_l1_list[i]}')
+#         ax.set_xlim([0, 1])
+#         ax.set_ylim([0, 500])
+
+#     # SSAE (Second row)
+#     for i, sae in enumerate(ssae_list):
+#         gsae_W_dec = gsae.W_dec / gsae.W_dec.norm(dim=1, keepdim=True)
+#         sae_W_dec = sae.W_dec / sae.W_dec.norm(dim=1, keepdim=True)
+#         maxsims = (gsae_W_dec @ sae_W_dec.T).max(0).values.to(torch.float32).cpu().detach()
+        
+#         # Select the current axis in the second row
+#         ax = axes[1, i]
+        
+#         # Plot the histogram on the current axis
+#         ax.hist(maxsims, bins=50, alpha=1.0)
+#         ax.set_xlabel('Max cossim')
+#         ax.set_ylabel('Frequency')
+#         ax.set_title(f'SSAE: l1_coeff = {ssae_l1_list[i]}')
+#         ax.set_xlim([0, 1])
+#         ax.set_ylim([0, 500])
+
+#     # Direct SAE (Third row)
+#     for i, sae in enumerate(direct_sae_list):
+#         gsae_W_dec = gsae.W_dec / gsae.W_dec.norm(dim=1, keepdim=True)
+#         sae_W_dec = sae.W_dec / sae.W_dec.norm(dim=1, keepdim=True)
+#         maxsims = (gsae_W_dec @ sae_W_dec.T).max(0).values.to(torch.float32).cpu().detach()
+        
+#         # Select the current axis in the third row
+#         ax = axes[2, i]
+        
+#         # Plot the histogram on the current axis
+#         ax.hist(maxsims, bins=50, alpha=1.0)
+#         ax.set_xlabel('Max cossim')
+#         ax.set_ylabel('Frequency')
+#         ax.set_title(f'Direct SAE: l1_coeff = {direct_sae_l1_list[i]}')
+#         ax.set_xlim([0, 1])
+#         ax.set_ylim([0, 500])
+
+#     # Add row titles
+#     # fig.text(0.5, 0.98, f'{subject[:-8]}: Max decoder cossim between GSAE-finetune & GSAE', ha='center', va='center', fontsize=16)
+#     # fig.text(0.5, 0.51, f'{subject[:-8]}: Max decoder cossim between SSAE & GSAE', ha='center', va='center', fontsize=16)
+#     # fig.text(0.5, 0.05, f'{subject[:-8]}: Max decoder cossim between Direct SAE & GSAE', ha='center', va='center', fontsize=16)
+#     # Add row titles with some space between the rows of the subplot
+#     fig.text(0.5, 0.98, f'{subject[:-8]}: Max decoder cossim between GSAE-finetune & GSAE', ha='center', va='center', fontsize=16)
+#     fig.text(0.5, 0.66, f'{subject[:-8]}: Max decoder cossim between SSAE & GSAE', ha='center', va='center', fontsize=16)
+#     fig.text(0.5, 0.34, f'{subject[:-8]}: Max decoder cossim between Direct SAE & GSAE', ha='center', va='center', fontsize=16)
+
+#     # Adjust the layout
+#     plt.tight_layout()
+
+#     # Add more space between rows
+#     plt.subplots_adjust(hspace=0.4)
+
+#     directory = 'plots/dec_cossimss'
+#     filename = f'{subject}.png'
+#     filepath = os.path.join(directory, filename)
+#     if not os.path.exists(directory):
+#         os.makedirs(directory)
+#     plt.savefig(filepath)
+#     plt.close()
+
+
+#     # ENCODERS
+#     # Create a single figure with three rows
+#     fig, axes = plt.subplots(3, len(ssae_list), figsize=(15, 10))
+
+#     # GSAE-ft ZOOMED (First row)
+#     for i, sae in enumerate(gsae_ft_list):
+#         gsae_W_enc = gsae.W_enc / gsae.W_enc.norm(dim=0, keepdim=True)
+#         sae_W_enc = sae.W_enc / sae.W_enc.norm(dim=0, keepdim=True)
+#         maxsims = (gsae_W_enc.T @ sae_W_enc).max(0).values.to(torch.float32).cpu().detach()
+        
+#         # Select the current axis in the first row
+#         ax = axes[0, i]
+        
+#         # Plot the histogram on the current axis
+#         ax.hist(maxsims, bins=100, alpha=1.0)
+#         ax.set_xlabel('Max cossim')
+#         ax.set_ylabel('Frequency')
+#         ax.set_title(f'GSAE-ft: l1_coeff = {gsae_ft_l1_list[i]}')
+#         ax.set_xlim([0, 1])
+#         ax.set_ylim([0, 500])
+
+#     # SSAE (Second row)
+#     for i, sae in enumerate(ssae_list):
+#         gsae_W_enc = gsae.W_enc / gsae.W_enc.norm(dim=0, keepdim=True)
+#         sae_W_enc = sae.W_enc / sae.W_enc.norm(dim=0, keepdim=True)
+#         maxsims = (gsae_W_enc.T @ sae_W_enc).max(0).values.to(torch.float32).cpu().detach()
+        
+#         # Select the current axis in the second row
+#         ax = axes[1, i]
+        
+#         # Plot the histogram on the current axis
+#         ax.hist(maxsims, bins=50, alpha=1.0)
+#         ax.set_xlabel('Max cossim')
+#         ax.set_ylabel('Frequency')
+#         ax.set_title(f'SSAE: l1_coeff = {ssae_l1_list[i]}')
+#         ax.set_xlim([0, 1])
+#         ax.set_ylim([0, 500])
+
+#     # Direct SAE (Third row)
+#     for i, sae in enumerate(direct_sae_list):
+#         gsae_W_enc = gsae.W_enc / gsae.W_enc.norm(dim=0, keepdim=True)
+#         sae_W_enc = sae.W_enc / sae.W_enc.norm(dim=0, keepdim=True)
+#         maxsims = (gsae_W_enc.T @ sae_W_enc).max(0).values.to(torch.float32).cpu().detach()
+        
+#         # Select the current axis in the third row
+#         ax = axes[2, i]
+        
+#         # Plot the histogram on the current axis
+#         ax.hist(maxsims, bins=50, alpha=1.0)
+#         ax.set_xlabel('Max cossim')
+#         ax.set_ylabel('Frequency')
+#         ax.set_title(f'Direct SAE: l1_coeff = {direct_sae_l1_list[i]}')
+#         ax.set_xlim([0, 1])
+#         ax.set_ylim([0, 500])
+
+
+#     # Add row titles with some space between the rows of the subplot
+#     fig.text(0.5, 0.98, f'{subject[:-8]}: Max encoder cossim between GSAE-finetune & GSAE', ha='center', va='center', fontsize=16)
+#     fig.text(0.5, 0.66, f'{subject[:-8]}: Max encoder cossim between SSAE & GSAE', ha='center', va='center', fontsize=16)
+#     fig.text(0.5, 0.34, f'{subject[:-8]}: Max encoder cossim between Direct SAE & GSAE', ha='center', va='center', fontsize=16)
+
+#     # Adjust the layout
+#     plt.tight_layout()
+
+#     # Add more space between rows
+#     plt.subplots_adjust(hspace=0.4)
+
+#     directory = 'plots/enc_cossimss'
+#     filename = f'{subject}.png'
+#     filepath = os.path.join(directory, filename)
+#     if not os.path.exists(directory):
+#         os.makedirs(directory)
+#     plt.savefig(filepath)
+#     plt.show()
+#     plt.close()
+
 def get_cossim_plots(gsae, gsae_ft_list, ssae_list, 
                      ssae_l1_list, gsae_ft_l1_list,
+                     direct_sae_list, direct_sae_l1_list,
                      subject):
-    # DECOEDERS
-    # Create a single figure with two rows
-    fig, axes = plt.subplots(2, len(ssae_list), figsize=(15, 10))
+    # Create a single figure with three rows and two columns
+    fig, axes = plt.subplots(3, 2, figsize=(12, 15))
 
-    # GSAE-ft ZOOMED (First row)
-    for i, sae in enumerate(gsae_ft_list):
-        gsae_W_dec = gsae.W_dec / gsae.W_dec.norm(dim=1, keepdim=True)
-        sae_W_dec = sae.W_dec / sae.W_dec.norm(dim=1, keepdim=True)
-        maxsims = (gsae_W_dec @ sae_W_dec.T).max(0).values.to(torch.float32).cpu().detach()
-        
-        # Select the current axis in the first row
-        ax = axes[0, i]
-        
-        # Plot the histogram on the current axis
-        ax.hist(maxsims, bins=100, alpha=1.0)
+    # Function to plot histogram
+    def plot_histogram(ax, data, title):
+        ax.hist(data, bins=50, alpha=1.0)
         ax.set_xlabel('Max cossim')
         ax.set_ylabel('Frequency')
-        ax.set_title(f'GSAE-ft: l1_coeff = {gsae_ft_l1_list[i]}')
+        ax.set_title(title)
         ax.set_xlim([0, 1])
         ax.set_ylim([0, 500])
 
-    # SSAE (Second row)
-    for i, sae in enumerate(ssae_list):
-        gsae_W_dec = gsae.W_dec / gsae.W_dec.norm(dim=1, keepdim=True)
-        sae_W_dec = sae.W_dec / sae.W_dec.norm(dim=1, keepdim=True)
-        maxsims = (gsae_W_dec @ sae_W_dec.T).max(0).values.to(torch.float32).cpu().detach()
-        
-        # Select the current axis in the second row
-        ax = axes[1, i]
-        
-        # Plot the histogram on the current axis
-        ax.hist(maxsims, bins=50, alpha=1.0)
-        ax.set_xlabel('Max cossim')
-        ax.set_ylabel('Frequency')
-        ax.set_title(f'SSAE: l1_coeff = {ssae_l1_list[i]}')
-        ax.set_xlim([0, 1])
-        ax.set_ylim([0, 500])
+    # Get the central index
+    central_index = len(ssae_list) // 2
 
-    # Add row titles
-    fig.text(0.5, 0.98, f'{subject[:-8]}: Max decoder cossim between GSAE-finetune & GSAE', ha='center', va='center', fontsize=16)
-    fig.text(0.5, 0.51, f'{subject[:-8]}: Max decoder cossim between SSAE & GSAE', ha='center', va='center', fontsize=16)
+    # DECODERS (First column)
+    # GSAE-ft
+    gsae_W_dec = gsae.W_dec / gsae.W_dec.norm(dim=1, keepdim=True)
+    sae_W_dec = gsae_ft_list[central_index].W_dec / gsae_ft_list[central_index].W_dec.norm(dim=1, keepdim=True)
+    maxsims = (gsae_W_dec @ sae_W_dec.T).max(0).values.to(torch.float32).cpu().detach()
+    plot_histogram(axes[0, 0], maxsims,'')
+
+    # SSAE
+    sae_W_dec = ssae_list[central_index].W_dec / ssae_list[central_index].W_dec.norm(dim=1, keepdim=True)
+    maxsims = (gsae_W_dec @ sae_W_dec.T).max(0).values.to(torch.float32).cpu().detach()
+    plot_histogram(axes[1, 0], maxsims,'')
+
+    # Direct SAE
+    sae_W_dec = direct_sae_list[central_index].W_dec / direct_sae_list[central_index].W_dec.norm(dim=1, keepdim=True)
+    maxsims = (gsae_W_dec @ sae_W_dec.T).max(0).values.to(torch.float32).cpu().detach()
+    plot_histogram(axes[2, 0], maxsims, '')
+
+    # ENCODERS (Second column)
+    # GSAE-ft
+    gsae_W_enc = gsae.W_enc / gsae.W_enc.norm(dim=0, keepdim=True)
+    sae_W_enc = gsae_ft_list[central_index].W_enc / gsae_ft_list[central_index].W_enc.norm(dim=0, keepdim=True)
+    maxsims = (gsae_W_enc.T @ sae_W_enc).max(0).values.to(torch.float32).cpu().detach()
+    plot_histogram(axes[0, 1], maxsims,'' )
+
+    # SSAE
+    sae_W_enc = ssae_list[central_index].W_enc / ssae_list[central_index].W_enc.norm(dim=0, keepdim=True)
+    maxsims = (gsae_W_enc.T @ sae_W_enc).max(0).values.to(torch.float32).cpu().detach()
+    plot_histogram(axes[1, 1], maxsims, '')
+
+    # Direct SAE
+    sae_W_enc = direct_sae_list[central_index].W_enc / direct_sae_list[central_index].W_enc.norm(dim=0, keepdim=True)
+    maxsims = (gsae_W_enc.T @ sae_W_enc).max(0).values.to(torch.float32).cpu().detach()
+    plot_histogram(axes[2, 1], maxsims,'')
+
+    # Set column titles
+    axes[0, 0].text(0.5, 1.1, 'Decoder', ha='center', va='center', transform=axes[0, 0].transAxes, fontsize=14)
+    axes[0, 1].text(0.5, 1.1, 'Encoder', ha='center', va='center', transform=axes[0, 1].transAxes, fontsize=14)
+
+    # Set row titles
+    for i, title in enumerate(['GSAE-finetune', 'SSAE', 'Direct SAE']):
+        fig.text(0.08, 0.77 - i*0.31, title, ha='right', va='center', rotation='vertical', fontsize=14)
+
+    # Set overall title
+    fig.suptitle(f'{subject[:-8]}: Max cossim between new feature and old GSAE features', fontsize=16)
 
     # Adjust the layout
     plt.tight_layout()
+    plt.subplots_adjust(top=0.93, hspace=0.3, wspace=0.3)
 
-    directory = 'plots/dec_cossimss'
-    filename = f'{subject}.png'
-    filepath = os.path.join(directory, filename)
-    if not os.path.exists(directory):
-        os.makedirs(directory)
-    plt.savefig(filepath)
-    plt.close()
-
-
-    # ENCODERS
-    # Create a single figure with two rows
-    fig, axes = plt.subplots(2, len(ssae_list), figsize=(15, 10))
-
-    # GSAE-ft ZOOMED (First row)
-    for i, sae in enumerate(gsae_ft_list):
-        gsae_W_enc = gsae.W_enc / gsae.W_enc.norm(dim=0, keepdim=True)
-        sae_W_enc = sae.W_enc / sae.W_enc.norm(dim=0, keepdim=True)
-        maxsims = (gsae_W_enc.T @ sae_W_enc).max(0).values.to(torch.float32).cpu().detach()
-        
-        # Select the current axis in the first row
-        ax = axes[0, i]
-        
-        # Plot the histogram on the current axis
-        ax.hist(maxsims, bins=100, alpha=1.0)
-        ax.set_xlabel('Max cossim')
-        ax.set_ylabel('Frequency')
-        ax.set_title(f'GSAE-ft: l1_coeff = {gsae_ft_l1_list[i]}')
-        ax.set_xlim([0, 1])
-        ax.set_ylim([0, 500])
-
-    # SSAE (Second row)
-    for i, sae in enumerate(ssae_list):
-        gsae_W_enc = gsae.W_enc / gsae.W_enc.norm(dim=0, keepdim=True)
-        sae_W_enc = sae.W_enc / sae.W_enc.norm(dim=0, keepdim=True)
-        maxsims = (gsae_W_enc.T @ sae_W_enc).max(0).values.to(torch.float32).cpu().detach()
-        
-        # Select the current axis in the second row
-        ax = axes[1, i]
-        
-        # Plot the histogram on the current axis
-        ax.hist(maxsims, bins=50, alpha=1.0)
-        ax.set_xlabel('Max cossim')
-        ax.set_ylabel('Frequency')
-        ax.set_title(f'SSAE: l1_coeff = {ssae_l1_list[i]}')
-        ax.set_xlim([0, 1])
-        ax.set_ylim([0, 500])
-
-    # Add row titles
-    fig.text(0.5, 0.98, f'{subject[:-8]}: Max encoder cossim between GSAE-finetune & GSAE', ha='center', va='center', fontsize=16)
-    fig.text(0.5, 0.51, f'{subject[:-8]}: Max encoder cossim between SSAE & GSAE', ha='center', va='center', fontsize=16)
-
-    # Adjust the layout
-    plt.tight_layout()
-
-    directory = 'plots/enc_cossimss'
-    filename = f'{subject}.png'
+    # Save the figure
+    directory = 'plots/cossims'
+    filename = f'{subject}_combined.png'
     filepath = os.path.join(directory, filename)
     if not os.path.exists(directory):
         os.makedirs(directory)
