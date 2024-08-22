@@ -397,13 +397,13 @@ def get_cossim_plots(gsae, gsae_ft_list, ssae_list,
     fig, axes = plt.subplots(3, 2, figsize=(12, 15))
 
     # Function to plot histogram
-    def plot_histogram(ax, data, title):
-        ax.hist(data, bins=50, alpha=1.0)
+    def plot_histogram(ax, data, title, color):
+        ax.hist(data, bins=50, alpha=0.4, color=color)
         ax.set_xlabel('Max cossim')
         ax.set_ylabel('Frequency')
         ax.set_title(title)
         ax.set_xlim([0, 1])
-        ax.set_ylim([0, 500])
+        ax.set_ylim([0, 500])     
 
     # Get the central index
     central_index = len(ssae_list) // 2
@@ -413,34 +413,34 @@ def get_cossim_plots(gsae, gsae_ft_list, ssae_list,
     gsae_W_dec = gsae.W_dec / gsae.W_dec.norm(dim=1, keepdim=True)
     sae_W_dec = gsae_ft_list[central_index].W_dec / gsae_ft_list[central_index].W_dec.norm(dim=1, keepdim=True)
     maxsims = (gsae_W_dec @ sae_W_dec.T).max(0).values.to(torch.float32).cpu().detach()
-    plot_histogram(axes[0, 0], maxsims,'')
+    plot_histogram(axes[0, 0], maxsims, '', 'red')
 
     # SSAE
     sae_W_dec = ssae_list[central_index].W_dec / ssae_list[central_index].W_dec.norm(dim=1, keepdim=True)
     maxsims = (gsae_W_dec @ sae_W_dec.T).max(0).values.to(torch.float32).cpu().detach()
-    plot_histogram(axes[1, 0], maxsims,'')
+    plot_histogram(axes[1, 0], maxsims, '', 'darkgoldenrod')
 
     # Direct SAE
     sae_W_dec = direct_sae_list[central_index].W_dec / direct_sae_list[central_index].W_dec.norm(dim=1, keepdim=True)
     maxsims = (gsae_W_dec @ sae_W_dec.T).max(0).values.to(torch.float32).cpu().detach()
-    plot_histogram(axes[2, 0], maxsims, '')
+    plot_histogram(axes[2, 0], maxsims, '', 'green')
 
     # ENCODERS (Second column)
     # GSAE-ft
     gsae_W_enc = gsae.W_enc / gsae.W_enc.norm(dim=0, keepdim=True)
     sae_W_enc = gsae_ft_list[central_index].W_enc / gsae_ft_list[central_index].W_enc.norm(dim=0, keepdim=True)
     maxsims = (gsae_W_enc.T @ sae_W_enc).max(0).values.to(torch.float32).cpu().detach()
-    plot_histogram(axes[0, 1], maxsims,'' )
+    plot_histogram(axes[0, 1], maxsims, '', 'red')
 
     # SSAE
     sae_W_enc = ssae_list[central_index].W_enc / ssae_list[central_index].W_enc.norm(dim=0, keepdim=True)
     maxsims = (gsae_W_enc.T @ sae_W_enc).max(0).values.to(torch.float32).cpu().detach()
-    plot_histogram(axes[1, 1], maxsims, '')
+    plot_histogram(axes[1, 1], maxsims, '', 'darkgoldenrod')
 
     # Direct SAE
     sae_W_enc = direct_sae_list[central_index].W_enc / direct_sae_list[central_index].W_enc.norm(dim=0, keepdim=True)
     maxsims = (gsae_W_enc.T @ sae_W_enc).max(0).values.to(torch.float32).cpu().detach()
-    plot_histogram(axes[2, 1], maxsims,'')
+    plot_histogram(axes[2, 1], maxsims, '', 'green')
 
     # Set column titles
     axes[0, 0].text(0.5, 1.1, 'Decoder', ha='center', va='center', transform=axes[0, 0].transAxes, fontsize=14)
